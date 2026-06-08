@@ -11,10 +11,10 @@
 # glibc / libstdc++ are backward-compatible only — a noble-built binary won't
 # load against bookworm's older glibc.
 FROM --platform=linux/amd64 ubuntu:24.04 AS whisper-build
-ARG WHISPER_CPP_REF=v1.7.4
+ARG WHISPER_CPP_REF=v1.8.6
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake git ca-certificates \
-        libvulkan-dev glslc \
+        libvulkan-dev glslc spirv-headers glslang-tools \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 RUN git clone --depth 1 --branch ${WHISPER_CPP_REF} https://github.com/ggerganov/whisper.cpp.git .

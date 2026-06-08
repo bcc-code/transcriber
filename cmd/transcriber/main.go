@@ -30,6 +30,7 @@ func main() {
 	maxTerminalJobs := flag.Int("max-terminal-jobs", 20, "how many finished jobs (completed/failed/canceled) to retain in memory; <= 0 disables the cap")
 	jobTimeout := flag.Duration("job-timeout", 30*time.Minute, "default wall-clock timeout per job; per-request timeout_seconds overrides this; <= 0 disables")
 	logFormat := flag.String("log-format", "text", "log handler: text (human-readable, dev) or json (structured, prod)")
+	whisperNoGPU := flag.Bool("whispercpp-no-gpu", false, "pass `-ng` to whisper-cli, forcing the CPU backend (use on hosts without a real GPU, e.g. Docker-on-Mac)")
 	flag.Parse()
 
 	handlerOpts := &slog.HandlerOptions{Level: slog.LevelInfo}
@@ -60,7 +61,7 @@ func main() {
 		}
 	}
 
-	registry := buildRegistry(*defaultModel)
+	registry := buildRegistry(*defaultModel, *whisperNoGPU)
 	if _, ok := registry.Default(); !ok {
 		slog.Error("default model not registered", "id", *defaultModel)
 		os.Exit(1)

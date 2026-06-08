@@ -78,6 +78,13 @@ corpus is mono-lingual), pass an ISO 639-1 code with `-default-language`,
 e.g. `["-default-language=no"]`. Requests can still override with their
 own `language` field, or send `"auto"` to opt back into detection.
 
+On hosts without a real GPU (Mac dev, CPU-only Linux), pass
+`-whispercpp-no-gpu` to force whisper-cli's CPU backend. Without it,
+the Vulkan backend compiled into the image picks Mesa's `llvmpipe`
+software rasterizer and aborts in shader codegen. The
+`docker-compose.override.yml` in this repo already sets this for local
+dev; production Linux hosts have real Vulkan devices and don't need it.
+
 Env vars set inside the image:
 
 - `WHISPER_CPP_BIN=/usr/local/bin/whisper-cli`

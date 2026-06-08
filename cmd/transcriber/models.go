@@ -11,7 +11,7 @@ import (
 	"transcriber/internal/transcriber/whispercpp"
 )
 
-func buildRegistry(defaultID string) *transcriber.Registry {
+func buildRegistry(defaultID string, whisperNoGPU bool) *transcriber.Registry {
 	r := transcriber.NewRegistry(defaultID)
 
 	r.Register(stub.New("stub", "Stub Adapter"))
@@ -36,6 +36,7 @@ func buildRegistry(defaultID string) *transcriber.Registry {
 			DTWPreset:       "large.v3",
 			VADModelFile:    vadModelFile,
 			ResolveVADModel: resolveVAD,
+			NoGPU:           whisperNoGPU,
 		}),
 		chunked.Config{},
 	))
@@ -53,6 +54,7 @@ func buildRegistry(defaultID string) *transcriber.Registry {
 			DTWPreset:       "large.v3",
 			VADModelFile:    vadModelFile,
 			ResolveVADModel: resolveVAD,
+			NoGPU:           whisperNoGPU,
 		}),
 		chunked.Config{},
 	))

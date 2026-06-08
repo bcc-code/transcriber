@@ -39,6 +39,12 @@ type Config struct {
 	// timestamps over music/silence. VADModelFile wins over ResolveVADModel.
 	VADModelFile    string
 	ResolveVADModel func(ctx context.Context) (string, error)
+
+	// NoGPU passes `-ng` to whisper-cli, forcing the CPU backend even when
+	// a GPU backend is compiled in. Use this on hosts without a real GPU
+	// (e.g. Docker-on-Mac, where ggml-vulkan picks Mesa's llvmpipe software
+	// rasterizer and aborts in shader codegen).
+	NoGPU bool
 }
 
 type Adapter struct {
@@ -97,6 +103,9 @@ func (a *Adapter) Transcribe(ctx context.Context, req transcriber.Request, onPro
 		"-t", strconv.Itoa(a.cfg.Threads),
 		"-pp",
 	}
+	if a.cfg.NoGPU {
+		args = append(args, "-ng")
+	}
 	if req.Language != "" && req.Language != "auto" {
 		args = append(args, "--language", req.Language)
 	}
@@ -136,19 +145,26 @@ func (a *Adapter) Transcribe(ctx context.Context, req transcriber.Request, onPro
 	capture := captureStderr(stderr, onProgress)
 	go io.Copy(io.Discard, stdout)
 
-	if err := cmd.Wait(); err != nil {
-		tail := capture.wait()
+	waitErr := cmd.Wait()
+	tail := capture.wait()
+	if waitErr != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		if tail != "" {
-			return nil, fmt.Errorf("whispercpp exit: %w: %s", err, tail)
+			return nil, fmt.Errorf("whispercpp exit: %w: %s", waitErr, tail)
 		}
-		return nil, fmt.Errorf("whispercpp exit: %w", err)
+		return nil, fmt.Errorf("whispercpp exit: %w", waitErr)
 	}
 
 	data, err := os.ReadFile(outPrefix + ".json")
 	if err != nil {
+		// whisper-cli exits 0 even when it rejects an unknown flag (it just
+		// prints help to stderr). Surface the stderr tail so the real cause
+		// isn't hidden behind a generic "no such file" from os.ReadFile.
+		if tail != "" {
+			return nil, fmt.Errorf("whispercpp output: %w: %s", err, tail)
+		}
 		return nil, fmt.Errorf("whispercpp output: %w", err)
 	}
 	tr, err := parseJSON(data, req.Language)
