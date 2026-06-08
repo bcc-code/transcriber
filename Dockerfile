@@ -23,7 +23,7 @@ RUN cmake -B build \
         -DWHISPER_BUILD_TESTS=OFF \
         -DWHISPER_BUILD_EXAMPLES=ON \
         -DBUILD_SHARED_LIBS=ON \
-    && cmake --build build --config Release --target whisper-cli -j \
+    && cmake --build build --config Release -j \
     && cmake --install build --prefix /opt/whisper
 
 # ---- Stage 2: build frontend (Nuxt → static) ----
