@@ -133,7 +133,10 @@ paths:
   /config:
     get:
       summary: Server configuration
-      description: Returns the default prompt baked into the server (empty string if none configured).
+      description: |
+        Returns server-wide defaults: the prompt baked into the server
+        (empty if none configured) and the default language code applied
+        when a request omits `language` (empty = let the model auto-detect).
       responses:
         "200":
           description: Server configuration.
@@ -143,7 +146,8 @@ paths:
                 type: object
                 properties:
                   default_prompt: { type: string }
-                required: [default_prompt]
+                  default_language: { type: string, example: "no" }
+                required: [default_prompt, default_language]
 
   /stats:
     get:
@@ -202,8 +206,9 @@ components:
         language:
           type: string
           description: |
-            ISO 639-1 language hint (e.g. `en`, `no`). Empty/`auto` lets the
-            model detect.
+            ISO 639-1 language hint (e.g. `en`, `no`). Empty falls back to
+            the server's `-default-language` (see `GET /config`); `auto`
+            forces auto-detect even when a default is configured.
           example: en
         format:
           type: string

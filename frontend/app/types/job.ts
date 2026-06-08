@@ -42,4 +42,5 @@ export interface ModelInfo {
 
 export interface ServerConfig {
   default_prompt: string;
+  default_language: string;
 }

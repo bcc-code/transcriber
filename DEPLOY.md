@@ -73,6 +73,11 @@ Flags are set via the `command:` field in `docker-compose.yml`. The
 defaults run `whisper-cpp-large-v3` with 2 workers; for a beefier host
 something like `["-workers=4", "-callback-workers=4"]` is reasonable.
 
+To skip whisper's language auto-detection (faster, more reliable when the
+corpus is mono-lingual), pass an ISO 639-1 code with `-default-language`,
+e.g. `["-default-language=no"]`. Requests can still override with their
+own `language` field, or send `"auto"` to opt back into detection.
+
 Env vars set inside the image:
 
 - `WHISPER_CPP_BIN=/usr/local/bin/whisper-cli`

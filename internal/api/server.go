@@ -12,14 +12,15 @@ import (
 )
 
 type Server struct {
-	store         *jobs.Store
-	queue         *jobs.Queue
-	registry      *transcriber.Registry
-	defaultPrompt string
+	store           *jobs.Store
+	queue           *jobs.Queue
+	registry        *transcriber.Registry
+	defaultPrompt   string
+	defaultLanguage string
 }
 
-func NewServer(store *jobs.Store, queue *jobs.Queue, registry *transcriber.Registry, defaultPrompt string) *Server {
-	return &Server{store: store, queue: queue, registry: registry, defaultPrompt: defaultPrompt}
+func NewServer(store *jobs.Store, queue *jobs.Queue, registry *transcriber.Registry, defaultPrompt, defaultLanguage string) *Server {
+	return &Server{store: store, queue: queue, registry: registry, defaultPrompt: defaultPrompt, defaultLanguage: defaultLanguage}
 }
 
 // Routes mounts staticHandler at "/" when non-nil; API patterns take precedence.
@@ -83,11 +84,16 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 		prompt = s.defaultPrompt
 	}
 
+	language := in.Language
+	if language == "" {
+		language = s.defaultLanguage
+	}
+
 	now := time.Now()
 	job := jobs.Job{
 		ID:             newID(),
 		Path:           in.Path,
-		Language:       transcriber.NormalizeLanguage(in.Language),
+		Language:       transcriber.NormalizeLanguage(language),
 		Format:         in.Format,
 		OutputPath:     in.OutputPath,
 		Priority:       in.Priority,
@@ -165,7 +171,10 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) config(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"default_prompt": s.defaultPrompt})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"default_prompt":   s.defaultPrompt,
+		"default_language": s.defaultLanguage,
+	})
 }
 
 // stats reports counts with capitalized JSON keys; Processed = any terminal status.

@@ -21,13 +21,13 @@ const defaultPrompt = ref("");
 const submitting = ref(false);
 const error = ref<string | null>(null);
 
-const LANGS = [
+const LANGS = ref([
     { value: "auto", label: "auto-detect" },
     { value: "no", label: "Norwegian" },
     { value: "en", label: "English" },
     { value: "de", label: "German" },
     { value: "nl", label: "Dutch" },
-];
+]);
 
 const FORMATS = [
     { value: "all", label: "all (json+srt+vtt+txt)" },
@@ -54,6 +54,20 @@ onMounted(async () => {
         const def = models.value.find((m) => m.default);
         model.value = def?.id ?? models.value[0]?.id ?? "";
         defaultPrompt.value = config.default_prompt;
+
+        // Seed the language dropdown from the server's -default-language, so
+        // a user-facing default matches what the server would have used anyway.
+        // If the configured code isn't in our static list, surface it so the
+        // current selection isn't a phantom value.
+        if (config.default_language) {
+            if (!LANGS.value.some((l) => l.value === config.default_language)) {
+                LANGS.value.push({
+                    value: config.default_language,
+                    label: config.default_language,
+                });
+            }
+            language.value = config.default_language;
+        }
     } catch (e: unknown) {
         error.value = `Could not load models: ${e instanceof Error ? e.message : String(e)}`;
     }

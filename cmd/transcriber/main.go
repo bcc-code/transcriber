@@ -15,6 +15,7 @@ import (
 	"transcriber/internal/api"
 	"transcriber/internal/callback"
 	"transcriber/internal/jobs"
+	"transcriber/internal/transcriber"
 	"transcriber/internal/web"
 	"transcriber/internal/worker"
 )
@@ -24,6 +25,7 @@ func main() {
 	workers := flag.Int("workers", 2, "number of transcription worker goroutines")
 	callbackWorkers := flag.Int("callback-workers", 2, "number of webhook delivery goroutines")
 	defaultModel := flag.String("default-model", "stub", "model adapter ID to use when the request omits `model`")
+	defaultLanguage := flag.String("default-language", "", "ISO 639-1 language hint applied when the request omits `language` (empty or `auto` = let the model detect)")
 	defaultPromptFile := flag.String("default-prompt-file", "prompt.txt", "path to a file whose contents are used as the prompt when the request omits one (missing file = no default prompt)")
 	maxTerminalJobs := flag.Int("max-terminal-jobs", 20, "how many finished jobs (completed/failed/canceled) to retain in memory; <= 0 disables the cap")
 	jobTimeout := flag.Duration("job-timeout", 30*time.Minute, "default wall-clock timeout per job; per-request timeout_seconds overrides this; <= 0 disables")
@@ -64,6 +66,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Validate up-front so a typo like `-default-language=nb` doesn't silently
+	// turn into auto-detect at request time. NormalizeLanguage already accepts
+	// empty and "auto", so we only need to flag everything else.
+	normalizedDefaultLang := transcriber.NormalizeLanguage(*defaultLanguage)
+	if *defaultLanguage != "" && *defaultLanguage != "auto" && normalizedDefaultLang == "auto" {
+		slog.Error("unsupported -default-language", "value", *defaultLanguage)
+		os.Exit(1)
+	}
+
 	store := jobs.NewStore(*maxTerminalJobs)
 	queue := jobs.NewQueue()
 	notifier := callback.NewNotifier(*callbackWorkers, 256)
@@ -78,7 +89,7 @@ func main() {
 	}, *jobTimeout)
 	pool.Start(ctx)
 
-	srv := api.NewServer(store, queue, registry, defaultPrompt)
+	srv := api.NewServer(store, queue, registry, defaultPrompt, normalizedDefaultLang)
 	addr := fmt.Sprintf(":%d", *port)
 	httpSrv := &http.Server{
 		Addr:              addr,
@@ -91,6 +102,7 @@ func main() {
 			"addr", addr,
 			"workers", *workers,
 			"default_model", *defaultModel,
+			"default_language", normalizedDefaultLang,
 			"models", len(registry.List()),
 		)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
