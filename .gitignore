@@ -25,5 +25,8 @@ logs
 
 local_test
 
+# Per-developer compose overrides (e.g. mapping local_test → /mnt/storage)
+docker-compose.override.yml
+
 # Default prompt file (deployment-specific vocabulary)
 prompt.txt
