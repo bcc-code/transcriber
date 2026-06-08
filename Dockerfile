@@ -7,8 +7,9 @@
 # ---- Stage 1: build whisper.cpp (whisper-cli) with Vulkan backend ----
 # Ubuntu 24.04 (noble) ships a recent glslc that handles the coopmat shader
 # syntax ggml-vulkan emits. Bookworm's package is too old; LunarG doesn't
-# publish arm64. The resulting binary still runs on the bookworm-slim runtime
-# stage (glibc / libstdc++ are forward-compatible).
+# publish arm64. The runtime stage must use the same (or newer) base, since
+# glibc / libstdc++ are backward-compatible only — a noble-built binary won't
+# load against bookworm's older glibc.
 FROM --platform=linux/amd64 ubuntu:24.04 AS whisper-build
 ARG WHISPER_CPP_REF=v1.7.4
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -50,7 +51,9 @@ COPY --from=frontend-build /src/frontend/.output/public/ ./internal/web/dist/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/transcriber ./cmd/transcriber
 
 # ---- Stage 4: runtime ----
-FROM --platform=linux/amd64 debian:bookworm-slim AS runtime
+# Matches the whisper-build base (ubuntu:24.04) so whisper-cli's glibc /
+# libstdc++ symbol requirements (GLIBC_2.38, GLIBCXX_3.4.32) are satisfied.
+FROM --platform=linux/amd64 ubuntu:24.04 AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg ca-certificates libgomp1 libstdc++6 \
         libvulkan1 mesa-vulkan-drivers \
