@@ -44,8 +44,10 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 ```
 
 The base `docker-compose.yml` works anywhere; `docker-compose.gpu.yml`
-overlays the GPU device exposure and is only safe to use on hosts that
-actually have a GPU and the necessary drivers / runtimes (see below).
+overlays the GPU device exposure and is **Linux-host only** — it mounts
+`/dev/dri` and reserves NVIDIA devices, neither of which exists on
+macOS or Windows. On a Mac dev machine, run the base compose file alone
+(CPU fallback, under qemu emulation — slow but correct).
 
 All Dockerfile stages are pinned to `linux/amd64` because the on-prem GPU
 hosts are x86_64. On an x86_64 build host this is a no-op; on an arm64
