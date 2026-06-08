@@ -22,7 +22,9 @@ RUN cmake -B build \
         -DGGML_VULKAN=ON \
         -DWHISPER_BUILD_TESTS=OFF \
         -DWHISPER_BUILD_EXAMPLES=ON \
-    && cmake --build build --config Release --target whisper-cli -j
+        -DBUILD_SHARED_LIBS=ON \
+    && cmake --build build --config Release --target whisper-cli -j \
+    && cmake --install build --prefix /opt/whisper
 
 # ---- Stage 2: build frontend (Nuxt → static) ----
 FROM --platform=linux/amd64 node:22-bookworm-slim AS frontend-build
@@ -64,7 +66,11 @@ ENV XDG_CACHE_HOME=/var/cache \
     WHISPER_CPP_BIN=/usr/local/bin/whisper-cli
 RUN mkdir -p /var/cache/transcriber/hf
 
-COPY --from=whisper-build /src/build/bin/whisper-cli /usr/local/bin/whisper-cli
+# `cmake --install` lays out whisper-cli + the libwhisper/libggml shared libs
+# it dynamically links against under one prefix. Drop it into /usr/local so the
+# binary and libs land on the default $PATH / loader path.
+COPY --from=whisper-build /opt/whisper/ /usr/local/
+RUN ldconfig
 COPY --from=go-build /out/transcriber /usr/local/bin/transcriber
 
 WORKDIR /app
