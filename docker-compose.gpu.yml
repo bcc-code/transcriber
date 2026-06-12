@@ -1,23 +1,13 @@
 # GPU access overlay. Compose this on top of docker-compose.yml on the on-prem
-# GPU host. Without it, the container runs CPU-only (fine for local sanity
-# checks, not fine for production throughput).
+# NVIDIA host. Without it, the container runs CPU-only (fine for local sanity
+# checks, not fine for production throughput). Requires the NVIDIA Container
+# Toolkit on the host.
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 
 services:
   transcriber:
-    # AMD / Intel — exposes the host's DRM device. Harmless on a host that
-    # only has NVIDIA, but the deploy.resources block below is what actually
-    # gives NVIDIA cards to the container.
-    devices:
-      - /dev/dri:/dev/dri
-    group_add:
-      - video
-      - render
-
-    # NVIDIA — requires the NVIDIA Container Toolkit on the host. Comment
-    # this block out if the host has only AMD/Intel GPUs.
     deploy:
       resources:
         reservations:

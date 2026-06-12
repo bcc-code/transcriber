@@ -1,36 +1,35 @@
 # Deploying transcriber
 
-Target: on-prem Linux host running Docker. The image bundles `whisper-cli`
-(whisper.cpp, built with the **Vulkan** GGML backend), `ffmpeg`/`ffprobe`,
-and the Go API + embedded SPA, so the container has everything it needs
+Target: on-prem Linux host with NVIDIA GPUs, running Docker. The image
+bundles `whisper-cli` (whisper.cpp, built with the **CUDA** GGML backend
+plus OpenBLAS for the CPU fallback path), `ffmpeg`/`ffprobe`, and the Go
+API + embedded SPA. Everything the container needs is in the image
 except the ggml model files (downloaded from Hugging Face on first use
 into a persisted volume).
 
-## GPU access (Vulkan)
+## GPU access (CUDA)
 
-whisper.cpp uses Vulkan for GPU acceleration — same image works for
-NVIDIA, AMD, and Intel, just with slightly different runtime wiring.
+Install the [NVIDIA Container Toolkit][nvct] on the host. With it in
+place, `docker-compose.gpu.yml` reserves all NVIDIA devices for the
+container, and `NVIDIA_DRIVER_CAPABILITIES=compute,utility` (baked into
+the image) tells the toolkit which driver libraries to expose. To run
+on CPU only — e.g. a host without NVIDIA hardware, or local Mac dev —
+bring up `docker-compose.yml` alone and add `-whispercpp-no-gpu` to the
+service command.
 
-**AMD / Intel** — the host needs working Mesa drivers; `docker-compose.gpu.yml`
-exposes `/dev/dri` and joins the `video`/`render` groups. Verify the GPU
-is visible inside the container:
+CUDA runtime version is pinned via `CUDA_VERSION` build arg
+(default `12.6.3`); this requires NVIDIA driver **≥ 560.28.03** on the
+host. Check with `nvidia-smi` before deploying. To target an older
+driver, lower `CUDA_VERSION` to a release whose minimum driver matches
+what's installed — see the [CUDA compatibility matrix][cuda-compat].
 
-```sh
-docker compose exec transcriber vulkaninfo --summary  # if installed
-# or just look at the first job's logs: whisper-cli prints the picked device.
-```
-
-**NVIDIA** — install the [NVIDIA Container Toolkit][nvct] on the host;
-`docker-compose.gpu.yml` already includes the `deploy.resources.reservations.devices`
-block that hands the GPUs to the container. The
-`NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics` baked into the image
-is what causes the toolkit to mount the NVIDIA Vulkan ICD inside.
-
-To run on CPU only, just bring up `docker-compose.yml` alone (no GPU
-overlay) — whisper.cpp falls back to the CPU backend when no Vulkan
-device is available.
+GPU architecture is pinned via `CUDA_ARCHS` build arg (default `"86"`,
+the SM version for the on-prem RTX 3090 / Ampere). If the deployment
+GPU changes, override at build time (e.g. `--build-arg CUDA_ARCHS=89`
+for L4 / RTX 40xx, `90` for H100) and update the Dockerfile default.
 
 [nvct]: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html
+[cuda-compat]: https://docs.nvidia.com/deploy/cuda-compatibility/
 
 ## Build & run
 
@@ -39,15 +38,15 @@ device is available.
 docker compose build
 docker compose up -d
 
-# On-prem with GPU access (Vulkan):
+# On-prem with NVIDIA GPU:
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 ```
 
 The base `docker-compose.yml` works anywhere; `docker-compose.gpu.yml`
-overlays the GPU device exposure and is **Linux-host only** — it mounts
-`/dev/dri` and reserves NVIDIA devices, neither of which exists on
-macOS or Windows. On a Mac dev machine, run the base compose file alone
-(CPU fallback, under qemu emulation — slow but correct).
+overlays the NVIDIA device reservation and is **Linux-host only** —
+the `nvidia` driver runtime isn't available on macOS or Windows. On a
+Mac dev machine, run the base compose file alone (CPU fallback, under
+qemu emulation — slow but correct).
 
 All Dockerfile stages are pinned to `linux/amd64` because the on-prem GPU
 hosts are x86_64. On an x86_64 build host this is a no-op; on an arm64
@@ -78,17 +77,25 @@ corpus is mono-lingual), pass an ISO 639-1 code with `-default-language`,
 e.g. `["-default-language=no"]`. Requests can still override with their
 own `language` field, or send `"auto"` to opt back into detection.
 
-On hosts without a real GPU (Mac dev, CPU-only Linux), pass
-`-whispercpp-no-gpu` to force whisper-cli's CPU backend. Without it,
-the Vulkan backend compiled into the image picks Mesa's `llvmpipe`
-software rasterizer and aborts in shader codegen. The
-`docker-compose.override.yml` in this repo already sets this for local
-dev; production Linux hosts have real Vulkan devices and don't need it.
+On hosts without an NVIDIA GPU (Mac dev, CPU-only Linux), pass
+`-whispercpp-no-gpu` to force whisper-cli's CPU backend (OpenBLAS-
+accelerated). Without it, the CUDA backend tries to initialize, fails
+to find a device, and the job errors. The `docker-compose.override.yml`
+in this repo already sets the flag for local dev; production NVIDIA
+hosts don't need it.
 
 Env vars set inside the image:
 
 - `WHISPER_CPP_BIN=/usr/local/bin/whisper-cli`
 - `XDG_CACHE_HOME=/var/cache` → models live at `/var/cache/transcriber/hf/<repo>/<file>`
+
+Both whisper.cpp adapters resolve the FP16 large-v3 weights (~3 GB
+each) — the reference quality. On the RTX 3090 (24 GB VRAM) there's no
+reason to trade accuracy for the Q5_0 variant; CUDA inference is
+compute-bound here, not memory-bound, so quantization wouldn't speed
+things up meaningfully either. To switch to a quantized file anyway
+(e.g. `ggml-large-v3-q5_0.bin`), pre-seed it into the volume and pin
+via `WHISPER_CPP_MODEL` / `NB_WHISPER_MODEL`.
 
 Override `WHISPER_CPP_MODEL` / `NB_WHISPER_MODEL` / `WHISPER_VAD_MODEL`
 on the service to pin a model to a specific file on disk instead of

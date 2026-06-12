@@ -120,29 +120,6 @@ list is a one-liner. The real work is the adapter: a new
 server over HTTP, plus lifecycle management (start it from the Go
 process, health-check it, restart on crash).
 
-## CUDA backend instead of Vulkan
-
-The on-prem box has NVIDIA GPUs, so the vendor-neutral Vulkan backend is
-buying portability we don't use. whisper.cpp's CUDA backend is more
-mature and typically meaningfully faster on NVIDIA hardware (often
-1.5–2× on the same card), with better memory handling for large-v3.
-
-Changes if pulled:
-
-- Swap the whisper-build stage base to `nvidia/cuda:12.x-devel-ubuntu22.04`;
-  drop `libvulkan-dev glslc`. Build with `-DGGML_CUDA=ON` (and pin
-  `-DCMAKE_CUDA_ARCHITECTURES=<sm_XX>` for the deployed GPU to shrink
-  the image and speed the build).
-- Runtime stage moves to `nvidia/cuda:12.x-runtime-ubuntu22.04`; drop
-  `libvulkan1 mesa-vulkan-drivers`. `NVIDIA_DRIVER_CAPABILITIES` can drop
-  `graphics` (that was only there for the Vulkan ICD).
-- `docker-compose.gpu.yml` loses the `/dev/dri` + `video/render` block
-  (that was the AMD/Intel path).
-
-Tradeoff: image grows by ~1–2 GB (CUDA runtime libs) and becomes
-NVIDIA-only. Host requirements don't change — NVIDIA Container Toolkit
-is already required for the Vulkan ICD passthrough.
-
 ## Image / deployment
 
 Quality-of-life items for the Docker image and on-prem deployment flow.

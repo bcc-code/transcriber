@@ -4,23 +4,37 @@
 # runs under qemu emulation, which is slow but produces deployment-correct
 # binaries; on x86_64 hosts --platform is a no-op.
 
-# ---- Stage 1: build whisper.cpp (whisper-cli) with Vulkan backend ----
-# Ubuntu 24.04 (noble) ships a recent glslc that handles the coopmat shader
-# syntax ggml-vulkan emits. Bookworm's package is too old; LunarG doesn't
-# publish arm64. The runtime stage must use the same (or newer) base, since
-# glibc / libstdc++ are backward-compatible only — a noble-built binary won't
-# load against bookworm's older glibc.
-FROM --platform=linux/amd64 ubuntu:24.04 AS whisper-build
+# ---- Stage 1: build whisper.cpp (whisper-cli) with CUDA backend ----
+# Pinned to the on-prem host's GPU stack: NVIDIA only. CUDA is whisper.cpp's
+# most-optimized backend (1.5–2× over Vulkan on NVIDIA). The runtime stage
+# uses the matching nvidia/cuda runtime image so libcudart / libcublas etc.
+# are available without polluting the host. Local Mac dev still works in
+# CPU-only mode (`-whispercpp-no-gpu`) — the CUDA libs are present but
+# unused.
+ARG CUDA_VERSION=12.6.3
+FROM --platform=linux/amd64 nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04 AS whisper-build
 ARG WHISPER_CPP_REF=v1.8.6
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential cmake git ca-certificates \
-        libvulkan-dev glslc spirv-headers glslang-tools \
+        build-essential cmake git ca-certificates pkg-config \
+        libopenblas-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 RUN git clone --depth 1 --branch ${WHISPER_CPP_REF} https://github.com/ggerganov/whisper.cpp.git .
+# BLAS stays on for the CPU fallback path (`-whispercpp-no-gpu`); on CUDA
+# hosts it's unused at runtime, so the only cost is image size.
+#
+# CMAKE_CUDA_ARCHITECTURES must be pinned: ggml-cuda's default is `native`,
+# which queries nvidia-smi on the build host — docker build has no GPU, so
+# the build would fail. Pinned to sm_86 for the on-prem RTX 3090 (Ampere).
+# If the deployment GPU changes, update this — building for the wrong arch
+# either falls back to PTX JIT at startup (slow) or fails outright.
+ARG CUDA_ARCHS="86"
 RUN cmake -B build \
         -DCMAKE_BUILD_TYPE=Release \
-        -DGGML_VULKAN=ON \
+        -DGGML_CUDA=ON \
+        -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}" \
+        -DGGML_BLAS=ON \
+        -DGGML_BLAS_VENDOR=OpenBLAS \
         -DWHISPER_BUILD_TESTS=OFF \
         -DWHISPER_BUILD_EXAMPLES=ON \
         -DBUILD_SHARED_LIBS=ON \
@@ -51,18 +65,19 @@ COPY --from=frontend-build /src/frontend/.output/public/ ./internal/web/dist/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/transcriber ./cmd/transcriber
 
 # ---- Stage 4: runtime ----
-# Matches the whisper-build base (ubuntu:24.04) so whisper-cli's glibc /
-# libstdc++ symbol requirements (GLIBC_2.38, GLIBCXX_3.4.32) are satisfied.
-FROM --platform=linux/amd64 ubuntu:24.04 AS runtime
+# Matches the whisper-build base so glibc / libstdc++ and CUDA runtime libs
+# (libcudart, libcublas) are present without bundling the full toolkit.
+FROM --platform=linux/amd64 nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu24.04 AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg ca-certificates libgomp1 libstdc++6 \
-        libvulkan1 mesa-vulkan-drivers \
+        libopenblas0-pthread \
     && rm -rf /var/lib/apt/lists/*
 
-# Allow the NVIDIA Container Toolkit to expose the proprietary Vulkan ICD
-# when running on NVIDIA hosts. Harmless on AMD/Intel (no nvidia runtime → ignored).
+# NVIDIA Container Toolkit reads these to expose the right device files and
+# driver libraries. `compute,utility` is all CUDA needs — we dropped `graphics`
+# along with the Vulkan backend.
 ENV NVIDIA_VISIBLE_DEVICES=all \
-    NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
 # Model cache: $XDG_CACHE_HOME/transcriber/hf/<repo>/<file>
 ENV XDG_CACHE_HOME=/var/cache \

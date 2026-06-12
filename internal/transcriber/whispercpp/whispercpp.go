@@ -41,9 +41,9 @@ type Config struct {
 	ResolveVADModel func(ctx context.Context) (string, error)
 
 	// NoGPU passes `-ng` to whisper-cli, forcing the CPU backend even when
-	// a GPU backend is compiled in. Use this on hosts without a real GPU
-	// (e.g. Docker-on-Mac, where ggml-vulkan picks Mesa's llvmpipe software
-	// rasterizer and aborts in shader codegen).
+	// a GPU backend is compiled in. Use this on hosts without a real NVIDIA
+	// GPU (e.g. Docker-on-Mac) where the CUDA backend would fail to find a
+	// device.
 	NoGPU bool
 }
 
