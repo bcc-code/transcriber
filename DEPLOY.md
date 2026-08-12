@@ -99,6 +99,20 @@ The frontend build downloads webfonts from `fonts.gstatic.com`
 (`@nuxt/fonts`), so the *builder* needs outbound internet even though the
 resulting image is self-contained.
 
+## Scratch space
+
+Adapter intermediates — extracted chunk wavs and raw whisper JSON — go into a
+per-job scratch directory that is deleted when the job ends, including on
+timeout, cancellation, and failure. Only the final transcripts are written to
+`output_path`.
+
+Scratch defaults to the OS temp dir (`/tmp` in the container, so the container's
+writable layer). Chunking writes roughly **115 MB per hour of audio**, so with
+`WORKERS=2` on long files budget a few GB of headroom. Set `-scratch-dir` to
+move it — keep it on local disk rather than network storage, since none of it
+is worth shipping over the wire. `-keep-work-dirs` retains the directories for
+inspecting a bad transcription.
+
 ## Volumes
 
 | Mount                                          | Purpose                                                                                                                                              |
@@ -165,10 +179,6 @@ Tracked in `IMPROVEMENTS.md`; these are the ones that affect operations:
 - **In-memory job store.** Restart or crash loses the queue and history.
   `MAX_TERMINAL_JOBS` (default 200 here) also evicts completed jobs, so a
   large enough burst can evict a result before the caller reads it.
-- **Chunk temp files are left behind.** For audio longer than 5 minutes,
-  per-chunk `.wav` files are written into the job's `output_path` and never
-  cleaned up — roughly 115 MB per hour of audio, accumulating on shared
-  storage.
 - **Output files are root-owned.** The container runs as root, so
   transcripts land on `STORAGE_PATH` as `root:root`.
 - **No authentication.** Anything that can reach the port can submit jobs

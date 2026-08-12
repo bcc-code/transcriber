@@ -55,10 +55,12 @@ func (a *Adapter) Transcribe(ctx context.Context, req transcriber.Request, onPro
 		return a.Inner.Transcribe(ctx, req, onProgress)
 	}
 
-	if err := os.MkdirAll(req.OutputDir, 0o755); err != nil {
+	if err := os.MkdirAll(req.WorkDir, 0o755); err != nil {
 		return nil, err
 	}
-	chunksDir := filepath.Join(req.OutputDir, "chunks")
+	// Extracted chunk wavs are ~32 kB/s of audio (16 kHz mono s16le), i.e.
+	// ~115 MB per hour. They live in scratch and are deleted with it.
+	chunksDir := filepath.Join(req.WorkDir, "chunks")
 	if err := os.MkdirAll(chunksDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -109,14 +111,14 @@ func (a *Adapter) transcribeChunk(ctx context.Context, req transcriber.Request, 
 	if err := ExtractChunk(ctx, a.cfg.FFmpegBin, req.InputPath, wavPath, ch.Start, ch.Duration()); err != nil {
 		return nil, err
 	}
-	chunkOutDir := filepath.Join(chunksDir, fmt.Sprintf("%03d", ch.Index))
-	if err := os.MkdirAll(chunkOutDir, 0o755); err != nil {
+	chunkWorkDir := filepath.Join(chunksDir, fmt.Sprintf("%03d", ch.Index))
+	if err := os.MkdirAll(chunkWorkDir, 0o755); err != nil {
 		return nil, err
 	}
 	subReq := transcriber.Request{
 		InputPath: wavPath,
 		Language:  req.Language,
-		OutputDir: chunkOutDir,
+		WorkDir:   chunkWorkDir,
 		Prompt:    req.Prompt,
 		Options:   req.Options,
 	}

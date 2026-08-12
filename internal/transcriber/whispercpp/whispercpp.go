@@ -90,10 +90,12 @@ func (a *Adapter) Transcribe(ctx context.Context, req transcriber.Request, onPro
 		}
 		modelPath = p
 	}
-	if err := os.MkdirAll(req.OutputDir, 0o755); err != nil {
+	if err := os.MkdirAll(req.WorkDir, 0o755); err != nil {
 		return nil, err
 	}
-	outPrefix := filepath.Join(req.OutputDir, "whispercpp_out")
+	// Raw whisper output is an intermediate: it goes in the scratch dir, not
+	// the caller's output_path.
+	outPrefix := filepath.Join(req.WorkDir, "whispercpp_out")
 
 	args := []string{
 		"-m", modelPath,

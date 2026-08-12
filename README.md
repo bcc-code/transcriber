@@ -53,6 +53,8 @@ Go code. Server settings come from flags; per-machine paths from env vars.
 | `-job-timeout`         | `30m`        | wall-clock cap per job; on expiry the worker cancels the subprocess and marks the job `FAILED` with `error: "timeout"`. Per-request `timeout_seconds` overrides this. `<= 0` disables |
 | `-max-terminal-jobs`   | `20`         | how many finished jobs (completed/failed/canceled) to retain in memory; `<= 0` disables the cap                                                                                       |
 | `-log-format`          | `text`       | `text` for human-readable output (dev), `json` for structured logs (prod). The Dockerfile sets `json`                                                                                 |
+| `-scratch-dir`         | _(OS temp)_  | where per-job scratch dirs are created for adapter intermediates (extracted chunk wavs, raw model output). Keep on local disk — chunking writes ~115 MB per hour of audio            |
+| `-keep-work-dirs`      | `false`      | retain per-job scratch dirs after completion, for inspecting a bad transcription. They are large; off by default                                                                     |
 
 | Env var             | Default                         | Meaning                                                                                                                                             |
 | ------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |

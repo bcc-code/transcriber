@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,20 +18,35 @@ import (
 	"transcriber/internal/transcriber"
 )
 
-// Pool is a fixed-size worker pool that runs jobs through the configured adapter.
-type Pool struct {
-	workers        int
-	store          *jobs.Store
-	queue          *jobs.Queue
-	registry       *transcriber.Registry
-	notifier       *callback.Notifier
-	dtoFn          func(jobs.Job) any
-	defaultTimeout time.Duration
-	wg             sync.WaitGroup
+// Config holds the pool's tunables.
+type Config struct {
+	// DefaultTimeout <= 0 disables the wall-clock cap; a job's own Timeout
+	// takes precedence when non-zero.
+	DefaultTimeout time.Duration
+
+	// ScratchRoot is where per-job working directories are created; empty uses
+	// os.TempDir(). Keep it on local disk — chunk extraction writes ~115 MB per
+	// hour of audio, and routing that through network storage is wasted I/O.
+	ScratchRoot string
+
+	// KeepWorkDirs retains per-job scratch directories after the job finishes,
+	// for inspecting a bad transcription. Off by default: they are large.
+	KeepWorkDirs bool
 }
 
-// New builds a pool. defaultTimeout <= 0 disables the wall-clock cap; the
-// per-job Timeout takes precedence when non-zero.
+// Pool is a fixed-size worker pool that runs jobs through the configured adapter.
+type Pool struct {
+	workers  int
+	store    *jobs.Store
+	queue    *jobs.Queue
+	registry *transcriber.Registry
+	notifier *callback.Notifier
+	dtoFn    func(jobs.Job) any
+	cfg      Config
+	wg       sync.WaitGroup
+}
+
+// New builds a pool.
 func New(
 	workers int,
 	store *jobs.Store,
@@ -37,19 +54,19 @@ func New(
 	registry *transcriber.Registry,
 	notifier *callback.Notifier,
 	dtoFn func(jobs.Job) any,
-	defaultTimeout time.Duration,
+	cfg Config,
 ) *Pool {
 	if workers < 1 {
 		workers = 1
 	}
 	return &Pool{
-		workers:        workers,
-		store:          store,
-		queue:          queue,
-		registry:       registry,
-		notifier:       notifier,
-		dtoFn:          dtoFn,
-		defaultTimeout: defaultTimeout,
+		workers:  workers,
+		store:    store,
+		queue:    queue,
+		registry: registry,
+		notifier: notifier,
+		dtoFn:    dtoFn,
+		cfg:      cfg,
 	}
 }
 
@@ -92,9 +109,20 @@ func (p *Pool) runJob(parent context.Context, id string, log *slog.Logger) {
 		return
 	}
 
+	// Scratch space for the adapter's intermediates, removed when the job ends
+	// (including on timeout, cancel, and failure) so nothing accumulates in the
+	// caller's output_path.
+	workDir, cleanupWorkDir, err := p.newWorkDir(id)
+	if err != nil {
+		p.markFailed(id, fmt.Errorf("create work dir: %w", err))
+		p.fireCallback(id)
+		return
+	}
+	defer cleanupWorkDir()
+
 	timeout := job.Timeout
 	if timeout <= 0 {
-		timeout = p.defaultTimeout
+		timeout = p.cfg.DefaultTimeout
 	}
 	var ctx context.Context
 	var cancel context.CancelFunc
@@ -124,7 +152,7 @@ func (p *Pool) runJob(parent context.Context, id string, log *slog.Logger) {
 	req := transcriber.Request{
 		InputPath: job.Path,
 		Language:  job.Language,
-		OutputDir: job.OutputPath,
+		WorkDir:   workDir,
 		Prompt:    job.Prompt,
 	}
 
@@ -173,6 +201,50 @@ func (p *Pool) runJob(parent context.Context, id string, log *slog.Logger) {
 	})
 	log.Info("job completed", "id", id, "duration", endedAt.Sub(startedAt))
 	p.fireCallback(id)
+}
+
+// newWorkDir allocates per-job scratch space and returns a cleanup func that
+// the caller must defer. The cleanup is a no-op (beyond a log line) when
+// KeepWorkDirs is set.
+func (p *Pool) newWorkDir(id string) (string, func(), error) {
+	root := p.cfg.ScratchRoot
+	if root == "" {
+		root = os.TempDir()
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", nil, err
+	}
+	dir, err := os.MkdirTemp(root, "transcriber-"+safeName(id)+"-")
+	if err != nil {
+		return "", nil, err
+	}
+	if p.cfg.KeepWorkDirs {
+		return dir, func() {
+			slog.Info("retaining job work dir", "id", id, "dir", dir)
+		}, nil
+	}
+	return dir, func() {
+		if err := os.RemoveAll(dir); err != nil {
+			slog.Warn("work dir cleanup failed", "id", id, "dir", dir, "err", err)
+		}
+	}, nil
+}
+
+// safeName reduces s to characters safe in a single filename component. The ID
+// goes into the work dir name so `-keep-work-dirs` output is traceable back to
+// a job, but os.MkdirTemp rejects patterns containing a path separator and IDs
+// are only hex by current convention.
+func safeName(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		case r == '-', r == '_', r == '.':
+			return r
+		default:
+			return '-'
+		}
+	}, s)
 }
 
 func (p *Pool) pickAdapter(j jobs.Job) (transcriber.Transcriber, error) {

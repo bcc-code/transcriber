@@ -30,6 +30,8 @@ func main() {
 	maxTerminalJobs := flag.Int("max-terminal-jobs", 20, "how many finished jobs (completed/failed/canceled) to retain in memory; <= 0 disables the cap")
 	jobTimeout := flag.Duration("job-timeout", 30*time.Minute, "default wall-clock timeout per job; per-request timeout_seconds overrides this; <= 0 disables")
 	logFormat := flag.String("log-format", "text", "log handler: text (human-readable, dev) or json (structured, prod)")
+	scratchDir := flag.String("scratch-dir", "", "directory for per-job scratch space (extracted audio chunks, raw model output); empty uses the OS temp dir. Keep this on local disk, not network storage")
+	keepWorkDirs := flag.Bool("keep-work-dirs", false, "retain per-job scratch directories after completion for debugging; they are large (~115 MB per hour of audio)")
 	whisperNoGPU := flag.Bool("whispercpp-no-gpu", false, "pass `-ng` to whisper-cli, forcing the CPU backend (use on hosts without a real GPU, e.g. Docker-on-Mac)")
 	flag.Parse()
 
@@ -87,7 +89,11 @@ func main() {
 
 	pool := worker.New(*workers, store, queue, registry, notifier, func(j jobs.Job) any {
 		return api.ToDTO(j)
-	}, *jobTimeout)
+	}, worker.Config{
+		DefaultTimeout: *jobTimeout,
+		ScratchRoot:    *scratchDir,
+		KeepWorkDirs:   *keepWorkDirs,
+	})
 	pool.Start(ctx)
 
 	srv := api.NewServer(store, queue, registry, defaultPrompt, normalizedDefaultLang)
