@@ -70,9 +70,67 @@ shows up minutes later as a mysteriously failed job.
 4. **Outbound HTTPS to `huggingface.co`.** Models (~3 GB) are fetched on
    first use. If the host is firewalled, pre-seed them (below) — otherwise
    every job fails.
+5. **Registry access.** Images pushed by GitHub Actions land as **private**
+   GHCR packages, so the host must authenticate before it can pull either
+   image:
+
+   ```sh
+   # PAT needs the read:packages scope.
+   echo "$GHCR_PAT" | docker login ghcr.io -u <github-user> --password-stdin
+   ```
+
+   Alternatively set both `transcriber` and `whisper-cuda` packages to
+   internal/public under `github.com/orgs/bcc-code/packages`. A failure
+   here looks like `denied` or `manifest unknown` on `docker compose pull`,
+   before anything GPU-related is even attempted.
 
 [nvct]: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html
 [cuda-compat]: https://docs.nvidia.com/deploy/cuda-compatibility/
+
+## First deployment, in order
+
+Each step's failure mode is distinct, so doing them in order means a
+failure tells you exactly which one you're on. See Troubleshooting at the
+end of this file for symptom → cause.
+
+```sh
+# 1. Verify the driver is new enough for the CUDA the image was built on.
+nvidia-smi                              # need >= 560.28.03
+
+# 2. Verify the container runtime can see the GPU at all.
+docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi
+
+# 3. Authenticate to GHCR (see Preflight step 5).
+echo "$GHCR_PAT" | docker login ghcr.io -u <github-user> --password-stdin
+
+# 4. Configure. STORAGE_PATH must already exist and must match the paths
+#    the caller puts in `path` / `output_path`.
+cp .env.example .env && $EDITOR .env
+ls -ld "$(grep -E '^STORAGE_PATH=' .env | cut -d= -f2)"
+
+# 5. Pull. Fails here = registry auth or a tag that was never published.
+docker compose pull
+
+# 6. Pre-seed the models BEFORE the first job — see "Pre-seeding models".
+#    Skipping this is the most common cause of a confusing first failure:
+#    the ~3 GB download runs inside the job's own timeout budget.
+
+# 7. Start, then watch it become healthy.
+docker compose up -d
+docker compose ps                        # want STATUS: healthy
+curl -fsS localhost:8888/healthz
+
+# 8. Short file first (single-pass), then a long one (exercises chunking).
+curl -sS -X POST localhost:8888/transcription/job \
+  -H 'content-type: application/json' \
+  -d '{"path":"/mnt/storage/<short>.mp3","language":"no","format":"all",
+       "output_path":"/mnt/storage/out/test1"}'
+```
+
+Poll with `GET /transcription/job/{id}` and watch `docker compose logs -f
+transcriber`. On success, `output_path` should contain **only** the five
+transcript files — any `chunks/` directory or `whispercpp_out.json` there
+means the scratch-directory handling regressed.
 
 ## Configure
 
@@ -89,6 +147,10 @@ $EDITOR .env
 `DEFAULT_LANGUAGE`, and `WORKERS`.
 
 ## Deploy
+
+Routine deploys and restarts. For a host that has never run this before,
+work through "First deployment, in order" above instead — it covers the
+one-time driver, registry, and model-seeding steps.
 
 Preferred — pull the CI-built image (no compiling on the host):
 
@@ -240,3 +302,25 @@ Tracked in `IMPROVEMENTS.md`; these are the ones that affect operations:
 - **No authentication.** Anything that can reach the port can submit jobs
   with arbitrary absolute `path` / `output_path` values. Bind to an
   internal interface (`BIND_ADDR`) and firewall it.
+
+## Troubleshooting
+
+| Symptom                                                                | Cause / fix                                                                                                                                                       |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `denied` / `manifest unknown` on `docker compose pull`                  | Not logged in to GHCR, or `IMAGE` / `BASE_IMAGE` points at a tag that was never published. See Preflight step 5.                                                   |
+| `nvidia-container-cli: requirement error: unsatisfied condition: cuda>=12.6` — container won't start | Host driver older than 560.28.03. Lower `CUDA_VERSION` and rebuild the base, or set `NVIDIA_DISABLE_REQUIRE=1` on the service.                                     |
+| `could not select device driver` on `up`                               | NVIDIA Container Toolkit not installed, or Docker not restarted after installing it.                                                                               |
+| `whisper-cli: error while loading shared libraries: libcuda.so.1`      | Running without GPU access. The image has no CPU mode — `libcuda.so.1` is injected by the toolkit. Check the `deploy.resources.reservations` block survived.        |
+| Every job fails instantly with ENOENT                                  | `STORAGE_PATH` doesn't exist on the host, or the caller's absolute paths don't match the mount. Host and container paths must be identical.                        |
+| First job fails with `error: "timeout"`                                | The ~3 GB model download runs inside the job's own timeout budget. Pre-seed the models, or raise `JOB_TIMEOUT` for the first run.                                   |
+| Jobs fail after a long wait; `hfcache` errors in the log               | No outbound HTTPS to `huggingface.co`. Pre-seed the models instead.                                                                                               |
+| Very slow start per job, or a CUDA init failure                        | `CUDA_ARCHS` doesn't match the GPU, so the kernels PTX-JIT at startup. Rebuild the base with the right SM version (86 = RTX 3090).                                 |
+| A job fails with a CUDA OOM                                            | Too many concurrent jobs for the VRAM. Each worker holds a ~3 GB FP16 model plus buffers; lower `WORKERS`.                                                          |
+| `chunks/` or `whispercpp_out.json` appearing in `output_path`           | Scratch-directory handling regressed — adapters should only write under the per-job work dir. See "Scratch space".                                                 |
+| Caller gets 404 for a job it just submitted                            | Either the process restarted (the job store is in-memory) or the job was evicted — raise `MAX_TERMINAL_JOBS`.                                                       |
+| Base image build dies mid-compile with no compiler error               | OOM-killed. `BUILD_JOBS` is derived from available memory, but override it lower: `--build-arg BUILD_JOBS=2`.                                                       |
+| `undefined reference to 'cuGetErrorString'` building the base          | The CUDA driver stub is missing from the link line — see the `CUDA_STUBS` args in `Dockerfile.whisper`.                                                             |
+
+Logs are the first stop for anything job-related: `docker compose logs -f
+transcriber`. `GET /stats` gives queue/running/processed counts, and
+`GET /transcription/jobs` lists every job the store still holds.
