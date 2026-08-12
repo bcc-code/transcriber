@@ -1,22 +1,71 @@
+# Single compose file for all hosts. Every knob comes from `.env` — copy
+# .env.example to .env and edit. See DEPLOY.md.
+#
+#   docker compose pull && docker compose up -d     # registry image (preferred)
+#   docker compose build && docker compose up -d    # build locally
+#
+# GPU access is part of THIS file, not an opt-in overlay, so the short command
+# is the correct production command. On a host without an NVIDIA GPU this fails
+# loudly ("could not select device driver") rather than silently running 20-50x
+# slower on CPU — for those hosts add -f docker-compose.cpu.yml.
+name: transcriber
+
 services:
   transcriber:
-    build: .
-    image: transcriber:latest
+    image: ${IMAGE:-ghcr.io/bcc-code/transcriber:latest}
+    build:
+      context: .
+      args:
+        CUDA_VERSION: ${CUDA_VERSION:-12.6.3}
+        CUDA_ARCHS: ${CUDA_ARCHS:-86}
+        WHISPER_CPP_REF: ${WHISPER_CPP_REF:-v1.8.6}
     restart: unless-stopped
+
+    # BIND_ADDR=0.0.0.0 preserves the previous behaviour: the API has no
+    # authentication, so anything that can reach this port can read and write
+    # any path visible inside the container. Firewall it, or set BIND_ADDR to
+    # an internal interface.
     ports:
-      - "8888:8888"
+      - "${BIND_ADDR:-0.0.0.0}:${PORT:-8888}:${PORT:-8888}"
+
+    command:
+      - "-port=${PORT:-8888}"
+      - "-workers=${WORKERS:-2}"
+      - "-callback-workers=${CALLBACK_WORKERS:-2}"
+      - "-default-model=${DEFAULT_MODEL:-whisper-cpp-large-v3}"
+      - "-default-language=${DEFAULT_LANGUAGE:-}"
+      - "-job-timeout=${JOB_TIMEOUT:-30m}"
+      - "-max-terminal-jobs=${MAX_TERMINAL_JOBS:-200}"
+      - "-log-format=${LOG_FORMAT:-json}"
+      # Go's flag package accepts an explicit boolean value, so this stays a
+      # single env toggle instead of a second compose file.
+      - "-whispercpp-no-gpu=${NO_GPU:-false}"
+
     volumes:
-      # Whisper model cache — persists ggml model downloads across restarts.
+      # ggml model cache — first job downloads ~3 GB, this keeps it.
       - models:/var/cache/transcriber
-      # Audio in / transcripts out. Adjust the host paths to your storage.
-      - /mnt/storage:/mnt/storage
-      # Optional: mount a default prompt file (vocabulary hints, etc.).
+      # Audio in / transcripts out. Job requests carry absolute paths that are
+      # resolved *inside* the container, so host and container paths must match.
+      # STORAGE_PATH must already exist on the host: Docker otherwise creates
+      # it as an empty root-owned directory and every job fails with ENOENT.
+      - ${STORAGE_PATH:-/mnt/storage}:${STORAGE_PATH:-/mnt/storage}
+      # Optional default prompt (vocabulary hints). Uncomment to use.
       # - ./prompt.txt:/app/prompt.txt:ro
 
-    # Override the default flags here if you want, e.g.:
-    # command: ["-port=8888", "-workers=4", "-default-model=nb-whisper-large"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:${PORT:-8888}/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
 
-# GPU access is opt-in via docker-compose.gpu.yml — see DEPLOY.md.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
 volumes:
   models:
