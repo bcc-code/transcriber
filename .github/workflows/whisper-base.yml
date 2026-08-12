@@ -1,20 +1,33 @@
 name: whisper-base
 
 # Builds the whisper.cpp + CUDA base image that the app image FROMs. This is the
-# expensive build (15-30 min of nvcc), so it runs only when Dockerfile.whisper
-# changes or when dispatched manually — not on every app change.
+# expensive build (15-30 min of nvcc), so it is heavily gated:
+#
+#  - Triggers on `push` (any branch) only when Dockerfile.whisper or this file
+#    changes. `push` evaluates `paths` against that push's own diff, so an
+#    unrelated commit will not fire it.
+#  - Deliberately NOT on `pull_request`: for PR events `paths` is evaluated
+#    against the whole PR diff, so it re-fires on *every* push to a PR branch,
+#    and PR runs can't publish anyway — which would leave the app image build
+#    permanently unable to resolve its base.
+#  - Skips the build entirely when the target tag already exists, so an
+#    accidental re-trigger costs seconds instead of half an hour. Pass
+#    `force: true` (or bump a version) to republish.
 #
 # The tag encodes both versions, e.g. v1.8.6-cuda12.6.3, so bumping either one
-# produces a new image and BASE_IMAGE in .env / docker-compose.yml selects it.
-# Nothing consumes `latest` by default; pin the versioned tag.
+# produces a new image; BASE_IMAGE in .env / docker-compose.yml / image.yml
+# selects it. Pin the versioned tag — nothing should depend on `latest`.
+#
+# NOTE: because the tag is shared, changing *how* the base is built without
+# changing a version will not republish unless you pass force: true. That is
+# intentional — it stops an in-progress branch from silently replacing a base
+# image the deployed app is running on.
 
 on:
   push:
-    branches: [main]
-    paths: [Dockerfile.whisper, .github/workflows/whisper-base.yml]
-  pull_request:
-    branches: [main]
-    paths: [Dockerfile.whisper, .github/workflows/whisper-base.yml]
+    paths:
+      - Dockerfile.whisper
+      - .github/workflows/whisper-base.yml
   workflow_dispatch:
     inputs:
       whisper_ref:
@@ -26,6 +39,10 @@ on:
       cuda_archs:
         description: "SM arch: 86=RTX 3090, 89=L4/RTX 40xx, 90=H100"
         default: "86"
+      force:
+        description: Rebuild and republish even if the tag already exists
+        type: boolean
+        default: false
 
 env:
   REGISTRY: ghcr.io
@@ -38,15 +55,42 @@ jobs:
       WHISPER_REF: ${{ inputs.whisper_ref || 'v1.8.6' }}
       CUDA_VERSION: ${{ inputs.cuda_version || '12.6.3' }}
       CUDA_ARCHS: ${{ inputs.cuda_archs || '86' }}
-      # Fork PRs get a read-only token and cannot touch the registry.
-      CAN_PUSH: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v5
 
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve tag and check whether it already exists
+        id: check
+        run: |
+          tag="${IMAGE}:${WHISPER_REF}-cuda${CUDA_VERSION}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          if docker buildx imagetools inspect "${tag}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "${tag} already exists" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip notice
+        if: steps.check.outputs.exists == 'true' && !inputs.force
+        run: |
+          echo "Skipping the ~20 min CUDA build: ${{ steps.check.outputs.tag }} is already published." \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo "Re-run this workflow with force: true to republish." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Free up disk space
+        if: steps.check.outputs.exists != 'true' || inputs.force
         # ubuntu-latest ships ~14 GB free on /. The CUDA devel image alone is
         # ~8 GB extracted, plus the whisper build tree and the runtime image —
         # it does not fit. Drop preinstalled toolchains this build never uses.
@@ -61,37 +105,32 @@ jobs:
           sudo docker image prune -af
           df -h /
 
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        if: env.CAN_PUSH == 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Build and push
+        if: steps.check.outputs.exists != 'true' || inputs.force
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.whisper
           platforms: linux/amd64
-          push: ${{ env.CAN_PUSH == 'true' && github.event_name != 'pull_request' }}
+          push: true
+          # `latest` only from the default branch: a feature branch may publish
+          # the versioned tag to bootstrap itself, but must not move `latest`.
           tags: |
-            ${{ env.IMAGE }}:${{ env.WHISPER_REF }}-cuda${{ env.CUDA_VERSION }}
-            ${{ env.IMAGE }}:latest
+            ${{ steps.check.outputs.tag }}
+            ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && format('{0}:latest', env.IMAGE) || '' }}
           build-args: |
             WHISPER_CPP_REF=${{ env.WHISPER_REF }}
             CUDA_VERSION=${{ env.CUDA_VERSION }}
             CUDA_ARCHS=${{ env.CUDA_ARCHS }}
 
-      - name: Next step
-        if: env.CAN_PUSH == 'true' && github.event_name != 'pull_request'
+      - name: Summary
+        if: steps.check.outputs.exists != 'true' || inputs.force
         run: |
-          echo "Pushed ${{ env.IMAGE }}:${{ env.WHISPER_REF }}-cuda${{ env.CUDA_VERSION }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "To use it, set in docker-compose.yml / .env:" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "BASE_IMAGE=${{ env.IMAGE }}:${{ env.WHISPER_REF }}-cuda${{ env.CUDA_VERSION }}" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          {
+            echo "Published \`${{ steps.check.outputs.tag }}\`"
+            echo ""
+            echo "Set this as BASE_IMAGE in \`.env\`, \`docker-compose.yml\`, and \`.github/workflows/image.yml\`:"
+            echo '```'
+            echo "BASE_IMAGE=${{ steps.check.outputs.tag }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

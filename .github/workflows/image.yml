@@ -71,6 +71,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify the base image exists
+        # Without this, a missing base fails deep inside buildx as
+        # "failed to solve: ...: not found" pointing at a FROM line, which
+        # doesn't hint at the actual fix.
+        if: env.CAN_PUSH == 'true'
+        run: |
+          if docker buildx imagetools inspect "${BASE_IMAGE}" >/dev/null 2>&1; then
+            echo "base image ok: ${BASE_IMAGE}"
+          else
+            echo "::error::Base image ${BASE_IMAGE} not found. It must be built and pushed once before the app image can build. Push a change to Dockerfile.whisper, or run the whisper-base workflow (available in the Actions UI only once that workflow is on the default branch)."
+            exit 1
+          fi
+
       - id: meta
         uses: docker/metadata-action@v5
         with:

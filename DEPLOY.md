@@ -27,11 +27,27 @@ Ordinary code changes rebuild only the app image, in seconds. `BASE_IMAGE`
 in `.env` / `docker-compose.yml` selects the base; the tag encodes both the
 whisper.cpp ref and the CUDA version.
 
-To bump whisper.cpp or CUDA: run the **whisper-base** workflow
-(`Actions → whisper-base → Run workflow`) with the new ref/version, then
-update `BASE_IMAGE` in `.env.example`, `docker-compose.yml`, and
-`image.yml`. On a fresh clone the base must be built once before the app
-image can build at all.
+The base must exist before the app image can build at all — the app's
+`FROM` resolves it. `image.yml` checks for it up front and fails with an
+actionable message rather than a cryptic buildx error.
+
+**Publishing a base.** `whisper-base.yml` triggers on a push (any branch)
+that touches `Dockerfile.whisper`, and via `Actions → whisper-base → Run
+workflow` once the workflow is on the default branch — `workflow_dispatch`
+is not offered for workflows that only exist on a feature branch, so on a
+new branch the push path is how you bootstrap it.
+
+It **skips the build if the target tag already exists**, so a re-trigger
+costs seconds rather than ~20 minutes. Consequently, changing *how* the
+base is built without changing a version does not republish: pass
+`force: true`. That is deliberate — it stops an in-progress branch from
+silently replacing the base image the deployed app is running on. A
+feature branch may publish the versioned tag, but only the default branch
+moves `latest`.
+
+**Bumping whisper.cpp or CUDA:** dispatch whisper-base with the new
+ref/version, then update `BASE_IMAGE` in `.env.example`,
+`docker-compose.yml`, and `image.yml`.
 
 ## Preflight
 
