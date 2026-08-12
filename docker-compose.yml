@@ -19,6 +19,7 @@ services:
         CUDA_VERSION: ${CUDA_VERSION:-12.6.3}
         CUDA_ARCHS: ${CUDA_ARCHS:-86}
         WHISPER_CPP_REF: ${WHISPER_CPP_REF:-v1.8.6}
+        BUILD_JOBS: ${BUILD_JOBS:-}
     restart: unless-stopped
 
     # BIND_ADDR=0.0.0.0 preserves the previous behaviour: the API has no

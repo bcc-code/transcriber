@@ -35,6 +35,14 @@ RUN git clone --depth 1 --branch ${WHISPER_CPP_REF} https://github.com/ggerganov
 # If the deployment GPU changes, override CUDA_ARCHS — building for the wrong
 # arch either falls back to PTX JIT at startup (slow) or fails outright.
 ARG CUDA_ARCHS="86"
+# BUILD_JOBS bounds compile parallelism. This matters: ggml-cuda's template
+# instantiations need roughly 2 GB of RAM *per concurrent nvcc*, so the build is
+# memory-bound, not core-bound. A bare `-j` means unlimited — it launched 138
+# concurrent nvcc processes in 2.6 s on a 4-vCPU/16 GB GitHub runner and the OOM
+# killer took down the runner agent mid-build, with no compiler error to show
+# for it. Empty derives a safe count from available memory, capped at the core
+# count; override with --build-arg BUILD_JOBS=N.
+ARG BUILD_JOBS
 RUN cmake -B build \
         -DCMAKE_BUILD_TYPE=Release \
         -DGGML_CUDA=ON \
@@ -44,7 +52,14 @@ RUN cmake -B build \
         -DWHISPER_BUILD_TESTS=OFF \
         -DWHISPER_BUILD_EXAMPLES=ON \
         -DBUILD_SHARED_LIBS=ON \
-    && cmake --build build --config Release -j \
+    && set -eu \
+    && cores="$(nproc)" \
+    && memjobs="$(awk '/^MemTotal:/ {printf "%d", $2/1024/1024/3}' /proc/meminfo)" \
+    && if [ "${memjobs}" -lt 1 ]; then memjobs=1; fi \
+    && jobs="${BUILD_JOBS:-${memjobs}}" \
+    && if [ "${jobs}" -gt "${cores}" ]; then jobs="${cores}"; fi \
+    && echo "whisper.cpp build: -j${jobs} (cores=${cores} mem-derived=${memjobs})" \
+    && cmake --build build --config Release --parallel "${jobs}" \
     && cmake --install build --prefix /opt/whisper
 # Fail here rather than at first transcription if the install layout changes.
 RUN test -x /opt/whisper/bin/whisper-cli
