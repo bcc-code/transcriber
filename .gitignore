@@ -32,4 +32,4 @@ docker-compose.override.yml
 prompt.txt
 
 # Compiled binary from `make build`
-transcriber
+./transcriber
