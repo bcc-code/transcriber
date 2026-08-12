@@ -35,7 +35,15 @@ type Word struct {
 type Request struct {
 	InputPath string
 	Language  string
-	OutputDir string
+	// WorkDir is scratch space for intermediate files (extracted chunk wavs,
+	// raw model output). It is owned by the caller, which deletes it once the
+	// job finishes, so adapters must not treat anything written here as a
+	// deliverable.
+	//
+	// It is deliberately NOT the job's output_path: the final transcripts are
+	// written by the worker via internal/formats, so nothing an adapter leaves
+	// behind lands in the directory the API caller reads.
+	WorkDir string
 	// Prompt biases the decoder toward names and terms it might otherwise mishear.
 	// whisper.cpp truncates to ~224 tokens.
 	Prompt  string

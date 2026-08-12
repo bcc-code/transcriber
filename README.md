@@ -38,6 +38,13 @@ to extract each chunk to a 16kHz mono wav. Model files are downloaded
 from Hugging Face on first use and cached on disk. The `stub` adapter
 has no external dependencies.
 
+On macOS, `brew install whisper-cpp ffmpeg` covers all three, and brew's
+`whisper-cli` is Metal-accelerated — so a native run is both the fastest
+and the only workable local option. **Do not use Docker for local
+development:** the image requires an NVIDIA GPU (`whisper-cli` there is
+linked against `libcuda.so.1`), so it cannot start on a Mac at all. See
+DEPLOY.md.
+
 ## Configuration
 
 The set of registered models lives in `cmd/transcriber/models.go` as typed
@@ -53,6 +60,8 @@ Go code. Server settings come from flags; per-machine paths from env vars.
 | `-job-timeout`         | `30m`        | wall-clock cap per job; on expiry the worker cancels the subprocess and marks the job `FAILED` with `error: "timeout"`. Per-request `timeout_seconds` overrides this. `<= 0` disables |
 | `-max-terminal-jobs`   | `20`         | how many finished jobs (completed/failed/canceled) to retain in memory; `<= 0` disables the cap                                                                                       |
 | `-log-format`          | `text`       | `text` for human-readable output (dev), `json` for structured logs (prod). The Dockerfile sets `json`                                                                                 |
+| `-scratch-dir`         | _(OS temp)_  | where per-job scratch dirs are created for adapter intermediates (extracted chunk wavs, raw model output). Keep on local disk — chunking writes ~115 MB per hour of audio            |
+| `-keep-work-dirs`      | `false`      | retain per-job scratch dirs after completion, for inspecting a bad transcription. They are large; off by default                                                                     |
 
 | Env var             | Default                         | Meaning                                                                                                                                             |
 | ------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |

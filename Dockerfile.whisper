@@ -1,0 +1,120 @@
+# syntax=docker/dockerfile:1.7
+
+# Base image: whisper.cpp (CUDA) + ffmpeg + CUDA runtime libs.
+#
+# Split out from the app Dockerfile because compiling whisper.cpp with nvcc
+# takes 15-30 minutes and only changes when WHISPER_CPP_REF or CUDA_VERSION
+# does — which is rarely. The app image FROMs this, so ordinary Go/frontend
+# changes rebuild in seconds instead of recompiling CUDA kernels.
+#
+# Build and publish (see .github/workflows/whisper-base.yml):
+#   docker build -f Dockerfile.whisper \
+#     -t ghcr.io/bcc-code/whisper-cuda:v1.8.6-cuda12.6.3 .
+#
+# NOTE: this image requires an NVIDIA GPU and driver at runtime. whisper-cli is
+# dynamically linked against libcuda.so.1, which the NVIDIA Container Toolkit
+# injects; without it the loader fails before main() and the binary cannot run
+# at all. There is no CPU-only mode for this image — use a native whisper-cli
+# build for CPU/Metal hosts.
+
+ARG ARCH=amd64
+ARG CUDA_VERSION=12.6.3
+
+# ---- Stage 1: build whisper.cpp (whisper-cli) with the CUDA backend ----
+FROM --platform=linux/${ARCH} nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04 AS whisper-build
+ARG WHISPER_CPP_REF=v1.8.6
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake git ca-certificates pkg-config \
+        libopenblas-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+# WHISPER_CPP_REF is a mutable tag — git tags can be force-moved, so the image
+# is not bit-reproducible. Pin a 40-char commit SHA when that matters.
+RUN git clone --depth 1 --branch ${WHISPER_CPP_REF} https://github.com/ggerganov/whisper.cpp.git .
+
+# BLAS stays on for CPU-side work; the only cost is image size.
+#
+# CMAKE_CUDA_ARCHITECTURES must be pinned: ggml-cuda's default is `native`,
+# which queries nvidia-smi on the build host — docker build has no GPU, so the
+# build would fail. 86 = RTX 3090 (Ampere); 89 = L4/RTX 40xx; 90 = H100.
+# Building for the wrong arch either falls back to PTX JIT at startup (slow) or
+# fails outright.
+ARG CUDA_ARCHS="86"
+
+# BUILD_JOBS bounds compile parallelism. This matters: ggml-cuda's template
+# instantiations need roughly 2 GB of RAM *per concurrent nvcc*, so the build is
+# memory-bound, not core-bound. A bare `-j` means unlimited — it launched 138
+# concurrent nvcc processes in 2.6 s on a 4-vCPU/16 GB GitHub runner and the OOM
+# killer took down the runner agent mid-build, with no compiler error to show
+# for it. Empty derives a safe count from available memory, capped at the core
+# count; override with --build-arg BUILD_JOBS=N.
+ARG BUILD_JOBS
+
+# The CUDA *driver* API stub must be on the link line. ggml-cuda calls
+# cuMemCreate / cuMemMap / cuDeviceGet / cuGetErrorString etc., which live in
+# libcuda.so (driver), not libcudart (runtime). With BUILD_SHARED_LIBS=ON,
+# libggml-cuda.so builds fine with those symbols undefined — shared libraries
+# tolerate that — and the failure only appears later when an executable links
+# against it ("undefined reference to `cuGetErrorString'"). The devel image ships
+# a stub at this arch-independent path; DT_NEEDED resolves to the real driver at
+# runtime, which the NVIDIA Container Toolkit injects.
+ARG CUDA_STUBS=/usr/local/cuda/lib64/stubs
+
+RUN cmake -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_CUDA=ON \
+        -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}" \
+        -DGGML_BLAS=ON \
+        -DGGML_BLAS_VENDOR=OpenBLAS \
+        -DWHISPER_BUILD_TESTS=OFF \
+        -DWHISPER_BUILD_EXAMPLES=ON \
+        -DBUILD_SHARED_LIBS=ON \
+        -DCMAKE_SHARED_LINKER_FLAGS="-L${CUDA_STUBS} -lcuda" \
+        -DCMAKE_EXE_LINKER_FLAGS="-L${CUDA_STUBS} -lcuda" \
+    && set -eu \
+    && cores="$(nproc)" \
+    && memjobs="$(awk '/^MemTotal:/ {printf "%d", $2/1024/1024/3}' /proc/meminfo)" \
+    && if [ "${memjobs}" -lt 1 ]; then memjobs=1; fi \
+    && jobs="${BUILD_JOBS:-${memjobs}}" \
+    && if [ "${jobs}" -gt "${cores}" ]; then jobs="${cores}"; fi \
+    && echo "whisper.cpp build: -j${jobs} (cores=${cores} mem-derived=${memjobs})" \
+    && cmake --build build --config Release --parallel "${jobs}" \
+    && cmake --install build --prefix /opt/whisper
+# Fail here rather than at first transcription if the install layout changes.
+RUN test -x /opt/whisper/bin/whisper-cli
+
+# ---- Stage 2: the published base ----
+# Matches the whisper-build base so glibc / libstdc++ and the CUDA runtime libs
+# (libcudart, libcublas) are present without bundling the full toolkit.
+#
+# NOTE: nvidia/cuda images carry NVIDIA_REQUIRE_CUDA=cuda>=<major.minor>, which
+# the NVIDIA Container Toolkit *enforces* at container start. With CUDA 12.6 the
+# host driver must be >= 560.28.03 or the container refuses to start with
+# "requirement error: unsatisfied condition: cuda>=12.6". Lower CUDA_VERSION or
+# set NVIDIA_DISABLE_REQUIRE=1 to override. See DEPLOY.md.
+FROM --platform=linux/${ARCH} nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu24.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg ca-certificates libgomp1 libstdc++6 \
+        libopenblas0-pthread \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# NVIDIA Container Toolkit reads these to expose the right device files and
+# driver libraries. `compute,utility` is all CUDA needs — `compute` is what
+# gets libcuda.so.1 injected, which whisper-cli requires to start.
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# `cmake --install` lays out whisper-cli plus the libwhisper/libggml shared libs
+# it dynamically links against under one prefix. Drop it into /usr/local so the
+# binary and libs land on the default $PATH / loader path.
+COPY --from=whisper-build /opt/whisper/ /usr/local/
+RUN ldconfig
+
+# Sanity-check the layout. whisper-cli itself can't be executed here (no driver
+# in the build container), so verify the loader can resolve everything *except*
+# libcuda.so.1, which the toolkit injects at runtime.
+RUN set -eu; \
+    missing="$(ldd /usr/local/bin/whisper-cli | awk '/not found/ {print $1}' | grep -v '^libcuda\.so\.1$' || true)"; \
+    if [ -n "${missing}" ]; then echo "unresolved libraries: ${missing}"; exit 1; fi; \
+    ffmpeg -version >/dev/null && ffprobe -version >/dev/null

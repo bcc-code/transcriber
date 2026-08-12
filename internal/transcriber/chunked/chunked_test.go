@@ -56,14 +56,14 @@ func TestAdapterEndToEnd(t *testing.T) {
 		t.Fatalf("ffmpeg generate: %v: %s", err, out)
 	}
 
-	outDir := filepath.Join(tmp, "out")
+	workDir := filepath.Join(tmp, "work")
 	inner := &fakeInner{}
 	a := New(inner, Config{ChunkLengthSec: 2, OverlapSec: 0.5})
 
 	var progressLast float64
 	res, err := a.Transcribe(context.Background(), transcriber.Request{
 		InputPath: src,
-		OutputDir: outDir,
+		WorkDir:   workDir,
 	}, func(p float64) {
 		progressLast = p
 	})
@@ -119,7 +119,7 @@ func TestAdapterShortFileBypassesChunking(t *testing.T) {
 	a := New(inner, Config{ChunkLengthSec: 300, OverlapSec: 3})
 	_, err := a.Transcribe(context.Background(), transcriber.Request{
 		InputPath: src,
-		OutputDir: filepath.Join(tmp, "out"),
+		WorkDir:   filepath.Join(tmp, "work"),
 	}, nil)
 	if err != nil {
 		t.Fatalf("Transcribe: %v", err)

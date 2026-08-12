@@ -29,7 +29,10 @@ prompt.txt
 # Pre-built binary
 transcriber
 
-# Docs / CI not needed in build context
+# Docs / CI / deploy config not needed in build context
 DEPLOY.md
 COMPATIBILITY.md
 IMPROVEMENTS.md
+.github
+docker-compose*.yml
+.env.example
