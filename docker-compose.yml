@@ -1,13 +1,14 @@
-# Single compose file for all hosts. Every knob comes from `.env` — copy
-# .env.example to .env and edit. See DEPLOY.md.
+# Single compose file. Every knob comes from `.env` — copy .env.example to .env
+# and edit. See DEPLOY.md.
 #
 #   docker compose pull && docker compose up -d     # registry image (preferred)
-#   docker compose build && docker compose up -d    # build locally
+#   docker compose build && docker compose up -d    # build the app image locally
 #
-# GPU access is part of THIS file, not an opt-in overlay, so the short command
-# is the correct production command. On a host without an NVIDIA GPU this fails
-# loudly ("could not select device driver") rather than silently running 20-50x
-# slower on CPU — for those hosts add -f docker-compose.cpu.yml.
+# This service REQUIRES an NVIDIA GPU and driver. whisper-cli is dynamically
+# linked against libcuda.so.1, which the NVIDIA Container Toolkit injects, so
+# without a GPU the binary cannot start at all — there is no CPU fallback in the
+# container. For local development on a machine without an NVIDIA GPU, run the
+# binary natively instead (`make build`); see README.md.
 name: transcriber
 
 services:
@@ -16,10 +17,9 @@ services:
     build:
       context: .
       args:
-        CUDA_VERSION: ${CUDA_VERSION:-12.6.3}
-        CUDA_ARCHS: ${CUDA_ARCHS:-86}
-        WHISPER_CPP_REF: ${WHISPER_CPP_REF:-v1.8.6}
-        BUILD_JOBS: ${BUILD_JOBS:-}
+        # Prebuilt whisper.cpp/CUDA base. Bump this to change whisper or CUDA
+        # versions; it is built separately by .github/workflows/whisper-base.yml.
+        BASE_IMAGE: ${BASE_IMAGE:-ghcr.io/bcc-code/whisper-cuda:v1.8.6-cuda12.6.3}
     restart: unless-stopped
 
     # BIND_ADDR=0.0.0.0 preserves the previous behaviour: the API has no
@@ -38,9 +38,6 @@ services:
       - "-job-timeout=${JOB_TIMEOUT:-30m}"
       - "-max-terminal-jobs=${MAX_TERMINAL_JOBS:-200}"
       - "-log-format=${LOG_FORMAT:-json}"
-      # Go's flag package accepts an explicit boolean value, so this stays a
-      # single env toggle instead of a second compose file.
-      - "-whispercpp-no-gpu=${NO_GPU:-false}"
 
     volumes:
       # ggml model cache — first job downloads ~3 GB, this keeps it.

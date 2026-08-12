@@ -1,0 +1,97 @@
+name: whisper-base
+
+# Builds the whisper.cpp + CUDA base image that the app image FROMs. This is the
+# expensive build (15-30 min of nvcc), so it runs only when Dockerfile.whisper
+# changes or when dispatched manually — not on every app change.
+#
+# The tag encodes both versions, e.g. v1.8.6-cuda12.6.3, so bumping either one
+# produces a new image and BASE_IMAGE in .env / docker-compose.yml selects it.
+# Nothing consumes `latest` by default; pin the versioned tag.
+
+on:
+  push:
+    branches: [main]
+    paths: [Dockerfile.whisper, .github/workflows/whisper-base.yml]
+  pull_request:
+    branches: [main]
+    paths: [Dockerfile.whisper, .github/workflows/whisper-base.yml]
+  workflow_dispatch:
+    inputs:
+      whisper_ref:
+        description: whisper.cpp git ref (tag or 40-char SHA)
+        default: v1.8.6
+      cuda_version:
+        description: CUDA version (must match a nvidia/cuda image tag)
+        default: 12.6.3
+      cuda_archs:
+        description: "SM arch: 86=RTX 3090, 89=L4/RTX 40xx, 90=H100"
+        default: "86"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository_owner }}/whisper-cuda
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      WHISPER_REF: ${{ inputs.whisper_ref || 'v1.8.6' }}
+      CUDA_VERSION: ${{ inputs.cuda_version || '12.6.3' }}
+      CUDA_ARCHS: ${{ inputs.cuda_archs || '86' }}
+      # Fork PRs get a read-only token and cannot touch the registry.
+      CAN_PUSH: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Free up disk space
+        # ubuntu-latest ships ~14 GB free on /. The CUDA devel image alone is
+        # ~8 GB extracted, plus the whisper build tree and the runtime image —
+        # it does not fit. Drop preinstalled toolchains this build never uses.
+        run: |
+          df -h /
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/share/boost \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af
+          df -h /
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: env.CAN_PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.whisper
+          platforms: linux/amd64
+          push: ${{ env.CAN_PUSH == 'true' && github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.IMAGE }}:${{ env.WHISPER_REF }}-cuda${{ env.CUDA_VERSION }}
+            ${{ env.IMAGE }}:latest
+          build-args: |
+            WHISPER_CPP_REF=${{ env.WHISPER_REF }}
+            CUDA_VERSION=${{ env.CUDA_VERSION }}
+            CUDA_ARCHS=${{ env.CUDA_ARCHS }}
+
+      - name: Next step
+        if: env.CAN_PUSH == 'true' && github.event_name != 'pull_request'
+        run: |
+          echo "Pushed ${{ env.IMAGE }}:${{ env.WHISPER_REF }}-cuda${{ env.CUDA_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To use it, set in docker-compose.yml / .env:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "BASE_IMAGE=${{ env.IMAGE }}:${{ env.WHISPER_REF }}-cuda${{ env.CUDA_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

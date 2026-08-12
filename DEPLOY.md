@@ -1,11 +1,37 @@
 # Deploying transcriber
 
-Target: on-prem Linux host with an NVIDIA GPU, running Docker. The image
-bundles `whisper-cli` (whisper.cpp, built with the **CUDA** GGML backend
-plus OpenBLAS for the CPU fallback path), `ffmpeg`/`ffprobe`, and the Go
-API + embedded SPA. Everything the container needs is in the image
-except the ggml model files (downloaded from Hugging Face on first use
-into a persisted volume).
+Target: on-prem Linux host with an NVIDIA GPU, running Docker. Everything
+the container needs is in the image except the ggml model files
+(downloaded from Hugging Face on first use into a persisted volume).
+
+> **An NVIDIA GPU and driver are required.** `whisper-cli` is dynamically
+> linked against `libcuda.so.1`, which the NVIDIA Container Toolkit injects
+> at container start. Without it the dynamic loader fails before `main()`,
+> so the binary cannot run at all — there is no CPU fallback in the
+> container, and `-whispercpp-no-gpu` is unreachable there. For CPU or
+> Apple-Metal hosts, run the Go binary natively against a native
+> `whisper-cli` (see README.md); that is also the recommended local
+> development path.
+
+## Two images
+
+The build is split in two, because compiling whisper.cpp with nvcc takes
+15–30 minutes and only changes when whisper.cpp or CUDA does:
+
+| Image                                     | Built by                              | Contains                                              |
+| ----------------------------------------- | ------------------------------------- | ----------------------------------------------------- |
+| `ghcr.io/bcc-code/whisper-cuda:<ref>-cuda<ver>` | `Dockerfile.whisper`, `whisper-base.yml` | whisper.cpp (CUDA), ffmpeg/ffprobe, CUDA runtime libs |
+| `ghcr.io/bcc-code/transcriber:<tag>`      | `Dockerfile`, `image.yml`             | the above + Go binary with embedded SPA               |
+
+Ordinary code changes rebuild only the app image, in seconds. `BASE_IMAGE`
+in `.env` / `docker-compose.yml` selects the base; the tag encodes both the
+whisper.cpp ref and the CUDA version.
+
+To bump whisper.cpp or CUDA: run the **whisper-base** workflow
+(`Actions → whisper-base → Run workflow`) with the new ref/version, then
+update `BASE_IMAGE` in `.env.example`, `docker-compose.yml`, and
+`image.yml`. On a fresh clone the base must be built once before the app
+image can build at all.
 
 ## Preflight
 
@@ -64,13 +90,8 @@ docker compose up -d
 
 GPU access is part of `docker-compose.yml`, so the short command above is
 the production command — there is no overlay to remember. On a host with
-no NVIDIA GPU this fails loudly with "could not select device driver"
-rather than silently running 20–50× slower on CPU. For those hosts:
-
-```sh
-# CPU-only (Mac dev, CPU-only Linux). Also set NO_GPU=true in .env.
-docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
-```
+no NVIDIA GPU it fails loudly with "could not select device driver", which
+is the correct outcome: the image cannot run without a GPU regardless.
 
 The API is served on `:8888`. Open `http://<host>:8888/` for the SPA or
 hit `POST /transcription/job` directly. `GET /healthz` and `GET /readyz`
@@ -83,17 +104,36 @@ container healthcheck — `docker compose ps` shows health at a glance.
 > present. Treat a green `/readyz` as "the process is up", not "the next
 > job will succeed".
 
-### Building the image
+### Building the images
 
-Only the whisper.cpp/CUDA stage and the runtime stage are target-arch
-(`linux/amd64`); the frontend and Go stages run natively on the build host
-and cross-compile. So on an arm64 Mac, `docker compose build` still has to
-qemu-emulate `nvcc`, which is slow (30–90 min) and prone to dying outright.
+**App image** (`Dockerfile`) — cheap. It only builds the SPA and the Go
+binary, both of which run natively on the build host and cross-compile, so
+nothing is qemu-emulated even on an arm64 Mac. Measured locally: ~2 s with
+a warm cache. `.github/workflows/image.yml` builds it on every push and
+tags `latest`, `sha-<short>`, and semver on tags. Pin a `sha-` tag in
+`.env` for a rollback-able deploy.
 
-Build on the Linux host, or let CI do it: `.github/workflows/image.yml`
-builds on an x86_64 runner and pushes to
-`ghcr.io/bcc-code/transcriber`, tagged `latest`, `sha-<short>`, and
-semver on tags. Pin a `sha-` tag in `.env` for a rollback-able deploy.
+**Base image** (`Dockerfile.whisper`) — expensive, and rarely rebuilt.
+Compiling ggml-cuda is ~15–30 min on an x86_64 runner. Two things about
+this build are easy to get wrong and are pinned deliberately:
+
+- **`BUILD_JOBS`.** nvcc needs roughly 2 GB of RAM per concurrent job for
+  ggml-cuda's template instantiations, so the build is memory-bound rather
+  than core-bound. A bare `-j` (unlimited) launched 138 concurrent nvcc
+  processes on a 4-vCPU/16 GB runner and the OOM killer took down the
+  runner agent mid-build, leaving no compiler error behind — the log simply
+  stopped. The job count is now derived from available memory and capped at
+  the core count; override with `--build-arg BUILD_JOBS=N`.
+- **The CUDA driver stub on the link line.** ggml-cuda calls driver-API
+  functions (`cuMemCreate`, `cuGetErrorString`, …) that live in
+  `libcuda.so`, not `libcudart`. With `BUILD_SHARED_LIBS=ON`,
+  `libggml-cuda.so` links fine with those undefined, and the failure
+  surfaces much later as `undefined reference to 'cuGetErrorString'` when
+  an executable links against it.
+
+Build it on an x86_64 host or via the **whisper-base** workflow. On arm64
+it also builds natively (nvidia/cuda publishes arm64 manifests), which is
+useful for validating changes to `Dockerfile.whisper` without qemu.
 
 The frontend build downloads webfonts from `fonts.gstatic.com`
 (`@nuxt/fonts`), so the *builder* needs outbound internet even though the

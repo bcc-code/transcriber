@@ -38,6 +38,13 @@ to extract each chunk to a 16kHz mono wav. Model files are downloaded
 from Hugging Face on first use and cached on disk. The `stub` adapter
 has no external dependencies.
 
+On macOS, `brew install whisper-cpp ffmpeg` covers all three, and brew's
+`whisper-cli` is Metal-accelerated — so a native run is both the fastest
+and the only workable local option. **Do not use Docker for local
+development:** the image requires an NVIDIA GPU (`whisper-cli` there is
+linked against `libcuda.so.1`), so it cannot start on a Mac at all. See
+DEPLOY.md.
+
 ## Configuration
 
 The set of registered models lives in `cmd/transcriber/models.go` as typed
