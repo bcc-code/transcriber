@@ -60,8 +60,16 @@ ARG BUILD_JOBS
 # runtime, which the NVIDIA Container Toolkit injects.
 ARG CUDA_STUBS=/usr/local/cuda/lib64/stubs
 
+# GGML_NATIVE must be OFF. ggml defaults it to ON, which compiles with
+# -march=native — i.e. for the CPU of whatever machine runs `docker build`
+# (a GitHub runner, often with AVX-512). On a host CPU lacking those
+# instructions whisper-cli dies with SIGILL ("illegal instruction") as soon as
+# it touches CPU code, even with the GPU doing the heavy lifting. With NATIVE
+# off, ggml targets a portable x86-64 baseline (SSE4.2/AVX/AVX2/FMA/F16C, no
+# AVX-512), which any server CPU from the last decade supports.
 RUN cmake -B build \
         -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_NATIVE=OFF \
         -DGGML_CUDA=ON \
         -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}" \
         -DGGML_BLAS=ON \

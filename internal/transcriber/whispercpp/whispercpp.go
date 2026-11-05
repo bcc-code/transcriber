@@ -115,7 +115,11 @@ func (a *Adapter) Transcribe(ctx context.Context, req transcriber.Request, onPro
 		args = append(args, "--prompt", req.Prompt)
 	}
 	if a.cfg.DTWPreset != "" {
-		args = append(args, "-dtw", a.cfg.DTWPreset)
+		// whisper.cpp >= 1.8 enables flash attention by default, and DTW is
+		// incompatible with it: whisper-cli logs "dtw_token_timestamps is not
+		// supported with flash_attn - disabling" and silently drops DTW, so
+		// word timestamps drift. -nfa keeps DTW on at some speed cost.
+		args = append(args, "-nfa", "-dtw", a.cfg.DTWPreset)
 	}
 	vadPath := a.cfg.VADModelFile
 	if vadPath == "" && a.cfg.ResolveVADModel != nil {
