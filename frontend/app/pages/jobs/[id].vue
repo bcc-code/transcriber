@@ -50,15 +50,24 @@ async function onCancel() {
                         job.id
                     }}</span>
                 </div>
-                <DesignButton
-                    v-if="canCancel"
-                    variant="danger"
-                    size="small"
-                    icon="tabler:circle-x"
-                    label="Cancel"
-                    :loading="canceling"
-                    @click="onCancel"
-                />
+                <div class="flex items-center gap-2">
+                    <DesignButton
+                        :to="`/?copy=${job.id}`"
+                        variant="secondary"
+                        size="small"
+                        icon="tabler:copy"
+                        label="Copy job"
+                    />
+                    <DesignButton
+                        v-if="canCancel"
+                        variant="danger"
+                        size="small"
+                        icon="tabler:circle-x"
+                        label="Cancel"
+                        :loading="canceling"
+                        @click="onCancel"
+                    />
+                </div>
             </div>
 
             <div v-if="job.status === 'RUNNING'">
@@ -80,6 +89,13 @@ async function onCancel() {
                 <Detail label="Priority">{{ job.priority }}</Detail>
                 <Detail label="Duration">{{ job.duration || "—" }}</Detail>
                 <Detail label="Callback">{{ job.callback || "—" }}</Detail>
+                <Detail v-if="job.timeout_seconds" label="Timeout">
+                    {{ job.timeout_seconds }}s
+                </Detail>
+                <Detail v-if="job.subtitle_options" label="Subtitles">
+                    {{ job.subtitle_options.max_chars_per_line ?? 42 }} chars/line ·
+                    {{ job.subtitle_options.max_lines_per_cue ?? 2 }} lines/cue
+                </Detail>
             </dl>
 
             <div v-if="job.prompt" class="border-t border-border-1 pt-4">

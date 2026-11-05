@@ -33,6 +33,7 @@ export default defineNuxtConfig({
   routeRules: {
     "/transcription/**": { proxy: `${TRANSCRIBER_API}/transcription/**` },
     "/models": { proxy: `${TRANSCRIBER_API}/models` },
+    "/models/**": { proxy: `${TRANSCRIBER_API}/models/**` },
     "/config": { proxy: `${TRANSCRIBER_API}/config` },
     "/stats": { proxy: `${TRANSCRIBER_API}/stats` },
     "/healthz": { proxy: `${TRANSCRIBER_API}/healthz` },

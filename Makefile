@@ -1,4 +1,4 @@
-.PHONY: help dev dev-api dev-frontend frontend build run test clean
+.PHONY: help dev dev-api dev-frontend frontend build run test sqlc clean
 
 help:
 	@echo 'Targets:'
@@ -9,6 +9,7 @@ help:
 	@echo '  build         frontend + go build → ./transcriber (single binary)'
 	@echo '  run           build then run ./transcriber'
 	@echo '  test          go test -race ./...'
+	@echo '  sqlc          regenerate internal/db/dbq from internal/db/{migrations,queries}'
 	@echo '  clean         remove build artifacts'
 
 # Run both servers in parallel. `set -m` puts each background recipe in its
@@ -46,6 +47,9 @@ run: build
 
 test:
 	go test -race ./...
+
+sqlc:
+	sqlc generate
 
 clean:
 	rm -f transcriber

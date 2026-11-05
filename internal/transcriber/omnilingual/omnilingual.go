@@ -52,6 +52,9 @@ func New(cfg Config) *Adapter {
 
 func (a *Adapter) ID() string { return a.cfg.ID }
 
+// IgnoresPrompt reports that this model has no prompt conditioning.
+func (a *Adapter) IgnoresPrompt() bool { return true }
+
 func (a *Adapter) Name() string {
 	if a.cfg.DisplayName != "" {
 		return a.cfg.DisplayName

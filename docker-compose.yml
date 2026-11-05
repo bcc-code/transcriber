@@ -38,6 +38,7 @@ services:
       - "-job-timeout=${JOB_TIMEOUT:-30m}"
       - "-max-terminal-jobs=${MAX_TERMINAL_JOBS:-200}"
       - "-log-format=${LOG_FORMAT:-json}"
+      - "-db=/var/lib/transcriber/transcriber.db"
 
     environment:
       # Set to http://omnilingual:8000 when the `omnilingual` profile is on.
@@ -47,6 +48,8 @@ services:
     volumes:
       # ggml model cache — first job downloads ~3 GB, this keeps it.
       - models:/var/cache/transcriber
+      # SQLite database (per-model prompts edited from the UI).
+      - data:/var/lib/transcriber
       # Audio in / transcripts out. Job requests carry absolute paths that are
       # resolved *inside* the container, so host and container paths must match.
       # STORAGE_PATH must already exist on the host: Docker otherwise creates
@@ -103,4 +106,5 @@ services:
 
 volumes:
   models:
+  data:
   omnilingual-cache:
