@@ -70,6 +70,7 @@ Go code. Server settings come from flags; per-machine paths from env vars.
 | `NB_WHISPER_MODEL`  | _(unset → fetched from HF)_     | local path override for the `nb-whisper-large` adapter. Unset = auto-download `NbAiLab/nb-whisper-large/ggml-model.bin` via `internal/hfcache`.     |
 | `WHISPER_VAD_MODEL` | _(unset → fetched from HF)_     | local path override for the Silero VAD model used to skip music/silence. Unset = auto-download `ggml-org/whisper-vad/ggml-silero-v5.1.2.bin`.       |
 | `XDG_CACHE_HOME`    | `~/.cache`                      | base for the HF cache (`<root>/transcriber/hf/<repo>/<file>`).                                                                                      |
+| `OMNILINGUAL_URL`   | _(unset)_                       | base URL of the Omnilingual ASR sidecar (`omnilingual/`). When set, the `omnilingual-7b` model is registered; unset = model hidden.                  |
 
 ## API
 

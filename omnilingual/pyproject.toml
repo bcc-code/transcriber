@@ -1,0 +1,21 @@
+[project]
+name = "omnilingual-sidecar"
+version = "0.1.0"
+description = "HTTP sidecar serving Meta Omnilingual ASR to the Go transcriber"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "omnilingual-asr==0.2.0",
+    "silero-vad==6.2.3",
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "python-multipart>=0.0.20",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
+# fairseq2 ships Linux wheels only; the sidecar only ever runs in the
+# linux/amd64 image (or a native Linux GPU box).
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
