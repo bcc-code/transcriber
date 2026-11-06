@@ -52,7 +52,8 @@ ARG ARCH
 # the build depend on whatever the floating image tag resolved to.
 ENV GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 # internal/web/dist is gitignored, so it is absent (or stale) in the build
@@ -68,7 +69,7 @@ FROM --platform=linux/${ARCH} ${BASE_IMAGE}
 # Model cache: $XDG_CACHE_HOME/transcriber/hf/<repo>/<file>
 ENV XDG_CACHE_HOME=/var/cache \
     WHISPER_CPP_BIN=/usr/local/bin/whisper-cli
-RUN mkdir -p /var/cache/transcriber/hf
+RUN mkdir -p /var/cache/transcriber/hf /var/lib/transcriber
 
 COPY --from=go-build /out/transcriber /usr/local/bin/transcriber
 
@@ -79,4 +80,4 @@ EXPOSE 8888
 # Flags come from docker-compose.yml (driven by .env); these defaults apply
 # when running the image directly with `docker run`.
 ENTRYPOINT ["/usr/local/bin/transcriber"]
-CMD ["-port=8888", "-workers=2", "-default-model=whisper-cpp-large-v3", "-log-format=json"]
+CMD ["-port=8888", "-workers=2", "-default-model=whisper-cpp-large-v3", "-db=/var/lib/transcriber/transcriber.db", "-log-format=json"]

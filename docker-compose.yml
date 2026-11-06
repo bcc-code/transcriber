@@ -38,10 +38,18 @@ services:
       - "-job-timeout=${JOB_TIMEOUT:-30m}"
       - "-max-terminal-jobs=${MAX_TERMINAL_JOBS:-200}"
       - "-log-format=${LOG_FORMAT:-json}"
+      - "-db=/var/lib/transcriber/transcriber.db"
+
+    environment:
+      # Set to http://omnilingual:8000 when the `omnilingual` profile is on.
+      # Empty = the omnilingual-7b model is not registered.
+      OMNILINGUAL_URL: ${OMNILINGUAL_URL:-}
 
     volumes:
       # ggml model cache — first job downloads ~3 GB, this keeps it.
       - models:/var/cache/transcriber
+      # SQLite database (per-model prompts edited from the UI).
+      - data:/var/lib/transcriber
       # Audio in / transcripts out. Job requests carry absolute paths that are
       # resolved *inside* the container, so host and container paths must match.
       # STORAGE_PATH must already exist on the host: Docker otherwise creates
@@ -65,5 +73,38 @@ services:
               count: all
               capabilities: [gpu]
 
+  # Meta Omnilingual ASR sidecar (omnilingual/). Opt-in:
+  #   docker compose --profile omnilingual up -d
+  # and set OMNILINGUAL_URL=http://omnilingual:8000 in .env. It holds ~17 GiB
+  # of VRAM on the same GPU as whisper. See DEPLOY.md before enabling it.
+  omnilingual:
+    profiles: ["omnilingual"]
+    image: ${OMNILINGUAL_IMAGE:-ghcr.io/bcc-code/omnilingual-asr:latest}
+    build:
+      context: ./omnilingual
+    restart: unless-stopped
+    environment:
+      OMNI_MODEL_CARD: ${OMNI_MODEL_CARD:-omniASR_LLM_7B_v2}
+      OMNI_BATCH_SIZE: ${OMNI_BATCH_SIZE:-4}
+    volumes:
+      # fairseq2 checkpoint cache — the 7B model is a multi-GB first download.
+      - omnilingual-cache:/cache
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      # First start downloads and loads the 7B checkpoint.
+      start_period: 30m
+      retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
 volumes:
   models:
+  data:
+  omnilingual-cache:

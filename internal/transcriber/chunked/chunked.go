@@ -41,6 +41,9 @@ func New(inner transcriber.Transcriber, cfg Config) *Adapter {
 func (a *Adapter) ID() string   { return a.Inner.ID() }
 func (a *Adapter) Name() string { return a.Inner.Name() }
 
+// Unwrap exposes the inner adapter for capability checks (see transcriber.SupportsPrompt).
+func (a *Adapter) Unwrap() transcriber.Transcriber { return a.Inner }
+
 func (a *Adapter) Transcribe(ctx context.Context, req transcriber.Request, onProgress transcriber.ProgressFunc) (*transcriber.Result, error) {
 	duration, err := ProbeDuration(ctx, a.cfg.FFprobeBin, req.InputPath)
 	if err != nil {

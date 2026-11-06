@@ -130,6 +130,36 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/Model" }
 
+  /models/{id}/prompt:
+    put:
+      summary: Set a model's default prompt
+      description: |
+        Stores the default prompt for a model (aliases resolve to their
+        model). An empty prompt clears it. Precedence when creating a job:
+        request `prompt` > model prompt > server-wide default prompt.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt: { type: string, maxLength: 4000 }
+      responses:
+        "200":
+          description: Updated model.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Model" }
+        "400": { description: Invalid body or prompt too long. }
+        "404": { description: Unknown model. }
+
   /config:
     get:
       summary: Server configuration
@@ -224,7 +254,7 @@ components:
           example: whisper-cpp-large-v3
         prompt:
           type: string
-          description: Initial prompt biasing the decoder. Empty uses the server-wide default prompt (if any).
+          description: Initial prompt biasing the decoder. Empty uses the model's prompt (see `PUT /models/{id}/prompt`), then the server-wide default prompt (if any).
         priority:
           type: integer
           description: Queue priority; lower number = sooner. Defaults to 1000.
@@ -314,11 +344,23 @@ components:
 
     Model:
       type: object
-      required: [id, name, default]
+      required: [id, name, default, aliases, prompt, supports_prompt]
       properties:
         id: { type: string }
         name: { type: string }
         default: { type: boolean }
+        aliases:
+          type: array
+          items: { type: string }
+          description: Alternate IDs accepted in `model` that resolve to this model.
+        prompt:
+          type: string
+          description: |
+            Per-model default prompt, used when a job omits `prompt`. Empty
+            means the server-wide default prompt applies.
+        supports_prompt:
+          type: boolean
+          description: False for models that ignore prompts (e.g. omnilingual-7b).
 
     Stats:
       type: object

@@ -7,6 +7,7 @@ import (
 	"transcriber/internal/hfcache"
 	"transcriber/internal/transcriber"
 	"transcriber/internal/transcriber/chunked"
+	"transcriber/internal/transcriber/omnilingual"
 	"transcriber/internal/transcriber/stub"
 	"transcriber/internal/transcriber/whispercpp"
 )
@@ -58,6 +59,20 @@ func buildRegistry(defaultID string, whisperNoGPU bool) *transcriber.Registry {
 		}),
 		chunked.Config{},
 	))
+
+	// Meta Omnilingual ASR runs as a Python sidecar (omnilingual/). Only
+	// registered when its URL is configured, so /models never advertises a
+	// model whose backend isn't running.
+	if url := os.Getenv("OMNILINGUAL_URL"); url != "" {
+		r.Register(chunked.New(
+			omnilingual.New(omnilingual.Config{
+				ID:          "omnilingual-7b",
+				DisplayName: "Meta Omnilingual ASR 7B",
+				BaseURL:     url,
+			}),
+			chunked.Config{},
+		))
+	}
 
 	// Sub-large sizes upgrade to large — matches the old runner's coercion behavior.
 	r.Alias("openai/whisper-large-v3", "whisper-cpp-large-v3")

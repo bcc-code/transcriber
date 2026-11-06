@@ -2,6 +2,7 @@ package transcriber
 
 import (
 	"context"
+	"sort"
 	"time"
 )
 
@@ -64,6 +65,23 @@ type Transcriber interface {
 	Transcribe(ctx context.Context, req Request, onProgress ProgressFunc) (*Result, error)
 }
 
+// SupportsPrompt reports whether t uses Request.Prompt. Adapters opt out by
+// implementing IgnoresPrompt() bool; wrappers expose their inner adapter via
+// Unwrap() Transcriber.
+func SupportsPrompt(t Transcriber) bool {
+	for t != nil {
+		if p, ok := t.(interface{ IgnoresPrompt() bool }); ok && p.IgnoresPrompt() {
+			return false
+		}
+		u, ok := t.(interface{ Unwrap() Transcriber })
+		if !ok {
+			break
+		}
+		t = u.Unwrap()
+	}
+	return true
+}
+
 type Registry struct {
 	adapters map[string]Transcriber
 	aliases  map[string]string // alternate ID -> canonical adapter ID
@@ -107,10 +125,24 @@ func (r *Registry) DefaultID() string {
 	return r.def
 }
 
+// List returns the registered adapters sorted by ID (aliases excluded).
 func (r *Registry) List() []Transcriber {
 	out := make([]Transcriber, 0, len(r.adapters))
 	for _, t := range r.adapters {
 		out = append(out, t)
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID() < out[j].ID() })
+	return out
+}
+
+// AliasesFor returns the alternate IDs that resolve to adapter id, sorted.
+func (r *Registry) AliasesFor(id string) []string {
+	var out []string
+	for from, to := range r.aliases {
+		if to == id {
+			out = append(out, from)
+		}
+	}
+	sort.Strings(out)
 	return out
 }

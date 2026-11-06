@@ -33,3 +33,11 @@ prompt.txt
 
 # Compiled binary from `make build`
 /transcriber
+
+# Python (omnilingual sidecar)
+.venv
+__pycache__
+.pytest_cache
+
+# Local SQLite database (+ WAL/SHM sidecars)
+transcriber.db*

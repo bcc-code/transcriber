@@ -14,7 +14,9 @@ import (
 
 	"transcriber/internal/api"
 	"transcriber/internal/callback"
+	"transcriber/internal/db"
 	"transcriber/internal/jobs"
+	"transcriber/internal/modelprompts"
 	"transcriber/internal/transcriber"
 	"transcriber/internal/web"
 	"transcriber/internal/worker"
@@ -27,6 +29,7 @@ func main() {
 	defaultModel := flag.String("default-model", "stub", "model adapter ID to use when the request omits `model`")
 	defaultLanguage := flag.String("default-language", "", "ISO 639-1 language hint applied when the request omits `language` (empty or `auto` = let the model detect)")
 	defaultPromptFile := flag.String("default-prompt-file", "prompt.txt", "path to a file whose contents are used as the prompt when the request omits one (missing file = no default prompt)")
+	dbPath := flag.String("db", "transcriber.db", "SQLite database file (created and migrated on startup); holds per-model prompts edited from the UI")
 	maxTerminalJobs := flag.Int("max-terminal-jobs", 20, "how many finished jobs (completed/failed/canceled) to retain in memory; <= 0 disables the cap")
 	jobTimeout := flag.Duration("job-timeout", 30*time.Minute, "default wall-clock timeout per job; per-request timeout_seconds overrides this; <= 0 disables")
 	logFormat := flag.String("log-format", "text", "log handler: text (human-readable, dev) or json (structured, prod)")
@@ -63,6 +66,14 @@ func main() {
 		}
 	}
 
+	conn, err := db.Open(context.Background(), *dbPath)
+	if err != nil {
+		slog.Error("opening database", "path", *dbPath, "err", err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+	modelPrompts := modelprompts.New(conn)
+
 	registry := buildRegistry(*defaultModel, *whisperNoGPU)
 	if _, ok := registry.Default(); !ok {
 		slog.Error("default model not registered", "id", *defaultModel)
@@ -96,7 +107,7 @@ func main() {
 	})
 	pool.Start(ctx)
 
-	srv := api.NewServer(store, queue, registry, defaultPrompt, normalizedDefaultLang)
+	srv := api.NewServer(store, queue, registry, modelPrompts, defaultPrompt, normalizedDefaultLang)
 	addr := fmt.Sprintf(":%d", *port)
 	httpSrv := &http.Server{
 		Addr:              addr,

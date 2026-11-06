@@ -3,6 +3,13 @@ import type { TranscribeJob } from "~/types/job";
 
 const props = defineProps<{ job: TranscribeJob }>();
 const emit = defineEmits<{ cancel: [] }>();
+const router = useRouter();
+
+function onCopy(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    router.push({ path: "/", query: { copy: props.job.id } });
+}
 
 const api = useApi();
 const canceling = ref(false);
@@ -66,6 +73,14 @@ async function onCancel(e: Event) {
                 >
                     {{ job.duration }}
                 </span>
+                <DesignButton
+                    variant="tertiary"
+                    title="Copy job"
+                    aria-label="Copy job"
+                    class="text-text-hint hover:text-text-default"
+                    icon="tabler:copy"
+                    @click="onCopy"
+                />
                 <DesignButton
                     v-if="canCancel"
                     variant="tertiary"

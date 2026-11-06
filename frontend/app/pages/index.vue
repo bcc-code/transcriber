@@ -2,7 +2,44 @@
 import type { TranscribeJob } from "~/types/job";
 
 const { jobs, loading, error, fetchOnce } = useJobsList();
+const api = useApi();
+const cache = useJobsCache();
+const route = useRoute();
+const router = useRouter();
+
 const showForm = ref(false);
+// Job to prefill the form with, from `/?copy=<id>`.
+const copyFrom = ref<TranscribeJob | null>(null);
+const copyError = ref<string | null>(null);
+
+watch(
+    () => route.query.copy,
+    async (id) => {
+        copyError.value = null;
+        if (typeof id !== "string" || !id) {
+            copyFrom.value = null;
+            return;
+        }
+        try {
+            copyFrom.value = cache.get(id) ?? (await api.getJob(id));
+            showForm.value = true;
+        } catch (e: unknown) {
+            copyFrom.value = null;
+            copyError.value = `Could not load job ${id} to copy: ${e instanceof Error ? e.message : String(e)}`;
+        }
+    },
+    { immediate: true },
+);
+
+function closeForm() {
+    showForm.value = false;
+    if (route.query.copy) router.replace({ query: {} });
+}
+
+function toggleForm() {
+    if (showForm.value) closeForm();
+    else showForm.value = true;
+}
 
 const activeJobs = computed(() =>
     jobs.value.filter(
@@ -19,7 +56,7 @@ const recentJobs = computed(() =>
 );
 
 async function onCreated(_job: TranscribeJob) {
-    showForm.value = false;
+    closeForm();
     await fetchOnce();
 }
 </script>
@@ -39,16 +76,28 @@ async function onCreated(_job: TranscribeJob) {
                     :variant="showForm ? 'secondary' : 'primary'"
                     :icon="showForm ? 'tabler:x' : 'tabler:plus'"
                     :label="showForm ? 'Close' : 'New job'"
-                    @click="showForm = !showForm"
+                    @click="toggleForm"
                 />
             </template>
         </DesignHeader>
 
+        <DesignBanner
+            v-if="copyError"
+            variant="error"
+            icon="tabler:alert-circle"
+            class="mb-4"
+        >
+            {{ copyError }}
+        </DesignBanner>
+
+        <!-- Keyed so switching the copy source remounts with fresh values. -->
         <NewJobForm
             v-if="showForm"
+            :key="copyFrom?.id ?? 'new'"
+            :initial="copyFrom"
             class="mb-6"
             @created="onCreated"
-            @cancel="showForm = false"
+            @cancel="closeForm"
         />
 
         <DesignBanner

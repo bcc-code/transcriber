@@ -236,6 +236,7 @@ inspecting a bad transcription.
 | Mount                                          | Purpose                                                                                                                                              |
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `models:/var/cache/transcriber`                | ggml whisper.cpp models. Survives restarts — first job downloads ~3 GB.                                                                               |
+| `data:/var/lib/transcriber`                    | SQLite database (`transcriber.db`) — per-model prompts edited on the UI's Models page.                                                               |
 | `${STORAGE_PATH}:${STORAGE_PATH}`              | Audio inputs (`path`) and transcript outputs (`output_path`). Mounted at the same path inside and out, because request paths resolve in the container. |
 | `./prompt.txt:/app/prompt.txt:ro` _(optional)_ | Default prompt file. Uncomment in `docker-compose.yml`. Without it, only requests carrying their own `prompt` get one.                                 |
 
@@ -250,6 +251,36 @@ reason to trade accuracy for the Q5_0 variant; CUDA inference is
 compute-bound here, not memory-bound. Override `WHISPER_CPP_MODEL` /
 `NB_WHISPER_MODEL` / `WHISPER_VAD_MODEL` on the service to pin a model to
 a specific file on disk instead of letting the HF cache resolve it.
+
+## Omnilingual ASR (optional)
+
+`omnilingual-7b` (Meta Omnilingual ASR 7B) runs in its own container, built
+from `omnilingual/`. It is a Python/PyTorch service and is off by default.
+
+```sh
+# .env
+OMNILINGUAL_URL=http://omnilingual:8000
+WORKERS=1                # see VRAM below
+
+docker compose --profile omnilingual up -d
+docker compose logs -f omnilingual    # wait for "model ready"
+```
+
+- **VRAM.** The LLM 7B checkpoint holds ~17 GiB, on the same GPU as
+  whisper (~3 GB per worker). On a 24 GB RTX 3090, `WORKERS=2` plus the
+  sidecar overshoots and jobs fail with CUDA OOM. Use `WORKERS=1`, or
+  `OMNI_MODEL_CARD=omniASR_CTC_7B_v2` (~15 GiB, much faster, ignores
+  language).
+- **Driver.** The image uses PyPI torch 2.8.0, which bundles a CUDA 12.8
+  runtime. That needs a newer host driver than the whisper image's CUDA 12.6
+  (>= 560.28.03). If the sidecar fails at CUDA init, check `nvidia-smi`
+  against NVIDIA's CUDA 12.8 driver table.
+- **First start** downloads the multi-GB checkpoint into the
+  `omnilingual-cache` volume. The healthcheck allows 30 minutes for it.
+  Jobs submitted earlier fail fast with `503 model not loaded`.
+- **Output.** There are no word timestamps, so subtitles get one cue per
+  speech region (at most 30 s). There is no prompt support, and the text is
+  likely lowercase with little punctuation. See `omnilingual/README.md`.
 
 ## Pre-seeding models
 

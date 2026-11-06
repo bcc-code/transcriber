@@ -1,0 +1,12 @@
+# Regenerate with `make sqlc` (or `sqlc generate`) after editing
+# internal/db/queries or internal/db/migrations.
+version: "2"
+sql:
+  - engine: sqlite
+    schema: internal/db/migrations
+    queries: internal/db/queries
+    gen:
+      go:
+        package: dbq
+        out: internal/db/dbq
+        emit_empty_slices: true

@@ -57,6 +57,7 @@ Go code. Server settings come from flags; per-machine paths from env vars.
 | `-callback-workers`    | `2`          | webhook delivery goroutines                                                                                                                                                           |
 | `-default-model`       | `stub`       | adapter ID used when the request omits `model`                                                                                                                                        |
 | `-default-prompt-file` | `prompt.txt` | file whose contents are used as the prompt when the request omits one; missing file = no default. A non-empty `prompt` in the request fully overrides it                              |
+| `-db`                 | `transcriber.db` | SQLite file, created and migrated (embedded goose migrations) on startup. Holds per-model prompts set on the UI's Models page |
 | `-job-timeout`         | `30m`        | wall-clock cap per job; on expiry the worker cancels the subprocess and marks the job `FAILED` with `error: "timeout"`. Per-request `timeout_seconds` overrides this. `<= 0` disables |
 | `-max-terminal-jobs`   | `20`         | how many finished jobs (completed/failed/canceled) to retain in memory; `<= 0` disables the cap                                                                                       |
 | `-log-format`          | `text`       | `text` for human-readable output (dev), `json` for structured logs (prod). The Dockerfile sets `json`                                                                                 |
@@ -70,6 +71,7 @@ Go code. Server settings come from flags; per-machine paths from env vars.
 | `NB_WHISPER_MODEL`  | _(unset → fetched from HF)_     | local path override for the `nb-whisper-large` adapter. Unset = auto-download `NbAiLab/nb-whisper-large/ggml-model.bin` via `internal/hfcache`.     |
 | `WHISPER_VAD_MODEL` | _(unset → fetched from HF)_     | local path override for the Silero VAD model used to skip music/silence. Unset = auto-download `ggml-org/whisper-vad/ggml-silero-v5.1.2.bin`.       |
 | `XDG_CACHE_HOME`    | `~/.cache`                      | base for the HF cache (`<root>/transcriber/hf/<repo>/<file>`).                                                                                      |
+| `OMNILINGUAL_URL`   | _(unset)_                       | base URL of the Omnilingual ASR sidecar (`omnilingual/`). When set, the `omnilingual-7b` model is registered; unset = model hidden.                  |
 
 ## API
 
@@ -133,9 +135,17 @@ serialize to.
 
 - `GET  /transcription/jobs` — list all jobs
 - `DELETE /transcription/job/{id}` — cancel a queued or running job
-- `GET  /models` — list registered adapters
+- `GET  /models` — list registered adapters (with aliases and per-model prompt)
+- `PUT  /models/{id}/prompt` — set/clear a model's default prompt. Precedence: request `prompt` > model prompt > `-default-prompt-file`
 - `GET  /config` — server-side defaults (currently `default_prompt`)
 - `GET  /healthz`, `GET /readyz`
+
+## Database
+
+SQLite (pure-Go `modernc.org/sqlite`, so `CGO_ENABLED=0` still works).
+Migrations live in `internal/db/migrations/` and are embedded and applied by
+goose on startup. Queries live in `internal/db/queries/`; after editing either,
+run `make sqlc` to regenerate `internal/db/dbq/`. Jobs are still in-memory only.
 
 ## Adding a new backend
 

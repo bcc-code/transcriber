@@ -20,6 +20,11 @@ export function useApi() {
         method: "DELETE",
       }),
     listModels: () => $fetch<ModelInfo[]>(`/models`),
+    setModelPrompt: (id: string, prompt: string) =>
+      $fetch<ModelInfo>(`/models/${encodeURIComponent(id)}/prompt`, {
+        method: "PUT",
+        body: { prompt },
+      }),
     getConfig: () => $fetch<ServerConfig>(`/config`),
   };
 }
