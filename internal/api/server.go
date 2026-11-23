@@ -9,6 +9,7 @@ import (
 
 	"transcriber/internal/jobs"
 	"transcriber/internal/transcriber"
+	"transcriber/internal/version"
 )
 
 type Server struct {
@@ -33,6 +34,7 @@ func (s *Server) Routes(staticHandler http.Handler) http.Handler {
 	mux.HandleFunc("GET /models", s.listModels)
 	mux.HandleFunc("GET /config", s.config)
 	mux.HandleFunc("GET /stats", s.stats)
+	mux.HandleFunc("GET /version", s.version)
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /readyz", s.ready)
 	mux.HandleFunc("GET /openapi.yaml", s.openapi)
@@ -195,6 +197,10 @@ func (s *Server) stats(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) version(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, version.Get())
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {

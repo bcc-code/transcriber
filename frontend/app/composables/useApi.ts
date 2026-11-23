@@ -1,6 +1,7 @@
 import type {
   ModelInfo,
   ServerConfig,
+  VersionInfo,
   TranscribeInput,
   TranscribeJob,
 } from "~/types/job";
@@ -21,5 +22,6 @@ export function useApi() {
       }),
     listModels: () => $fetch<ModelInfo[]>(`/models`),
     getConfig: () => $fetch<ServerConfig>(`/config`),
+    getVersion: () => $fetch<VersionInfo>(`/version`),
   };
 }

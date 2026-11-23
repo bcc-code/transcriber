@@ -149,6 +149,25 @@ paths:
                   default_language: { type: string, example: "no" }
                 required: [default_prompt, default_language]
 
+  /version:
+    get:
+      summary: Build version
+      description: |
+        The git commit the running binary was built from. Images built by CI
+        carry the full SHA; local builds use Go's VCS stamp, or "unknown".
+      responses:
+        "200":
+          description: Build identity.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  commit: { type: string, example: e4268d0669206e8ead78c3153dbc0c0901419771 }
+                  build_time: { type: string, example: "2026-11-23T08:49:53Z" }
+                  modified: { type: boolean, description: "Local build from a dirty working tree." }
+                required: [commit, build_time, modified]
+
   /stats:
     get:
       summary: Job-count summary

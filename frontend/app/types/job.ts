@@ -40,6 +40,12 @@ export interface ModelInfo {
   default: boolean;
 }
 
+export interface VersionInfo {
+  commit: string;
+  build_time: string;
+  modified: boolean;
+}
+
 export interface ServerConfig {
   default_prompt: string;
   default_language: string;

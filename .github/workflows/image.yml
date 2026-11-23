@@ -106,6 +106,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BASE_IMAGE=${{ env.BASE_IMAGE }}
+            GIT_COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
           # No build cache, deliberately. Measured on the first green run: the
           # cacheable work is pnpm install (8.9s) + generate (8.2s) + go build
           # (19.8s) = ~37s, while `cache-to: type=gha,mode=max` spent 271s

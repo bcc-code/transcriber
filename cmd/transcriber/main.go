@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"transcriber/internal/callback"
 	"transcriber/internal/jobs"
 	"transcriber/internal/transcriber"
+	"transcriber/internal/version"
 	"transcriber/internal/web"
 	"transcriber/internal/worker"
 )
@@ -104,13 +106,22 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	modelIDs := make([]string, 0, len(registry.List()))
+	for _, m := range registry.List() {
+		modelIDs = append(modelIDs, m.ID())
+	}
+	slices.Sort(modelIDs)
+
 	go func() {
+		v := version.Get()
 		slog.Info("transcriber api listening",
 			"addr", addr,
+			"commit", v.Commit,
+			"build_time", v.BuildTime,
 			"workers", *workers,
 			"default_model", *defaultModel,
 			"default_language", normalizedDefaultLang,
-			"models", len(registry.List()),
+			"models", modelIDs,
 		)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("http server failed", "err", err)

@@ -278,6 +278,13 @@ docker compose pull      # or: docker compose build
 docker compose up -d
 ```
 
+`git pull` matters even when you only pull images: new settings (e.g.
+`ELEVENLABS_API_KEY`) are forwarded into the container by
+`docker-compose.yml`, so an old compose file silently drops them. After
+pulling, diff `.env.example` against `.env` for new knobs. The startup log
+line `transcriber api listening` lists the registered model IDs — check it
+to confirm a backend is enabled.
+
 The API has a 10 s graceful shutdown — in-flight HTTP requests finish,
 but workers receive a cancel and any running transcription jobs are
 killed. **The job store is in-memory**, so a restart also discards the

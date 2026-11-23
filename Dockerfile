@@ -46,6 +46,10 @@ RUN pnpm ${PNPM_FLAGS} generate
 # Also native + cross-compiled: CGO_ENABLED=0 makes GOARCH a pure flag flip.
 FROM --platform=$BUILDPLATFORM golang:1.26.3-bookworm AS go-build
 ARG ARCH
+# Build identity, reported by GET /version and the startup log. CI passes the
+# commit SHA; .git is not in the build context, so nothing else can supply it.
+ARG GIT_COMMIT=""
+ARG BUILD_TIME=""
 # go.mod pins a patch version (go 1.26.3). GOTOOLCHAIN=local makes a mismatch
 # with this base image fail loudly instead of silently downloading a toolchain
 # from proxy.golang.org — which breaks in network-restricted builders and makes
@@ -60,7 +64,9 @@ COPY internal ./internal
 # exist and contain index.html.
 RUN rm -rf internal/web/dist && mkdir -p internal/web/dist
 COPY --from=frontend-build /src/frontend/.output/public/ ./internal/web/dist/
-RUN GOARCH=${ARCH} go build -trimpath -ldflags='-s -w' -o /out/transcriber ./cmd/transcriber
+RUN GOARCH=${ARCH} go build -trimpath \
+      -ldflags="-s -w -X transcriber/internal/version.Commit=${GIT_COMMIT} -X transcriber/internal/version.BuildTime=${BUILD_TIME}" \
+      -o /out/transcriber ./cmd/transcriber
 
 # ---- Stage 3: runtime ----
 FROM --platform=linux/${ARCH} ${BASE_IMAGE}

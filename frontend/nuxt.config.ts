@@ -35,6 +35,7 @@ export default defineNuxtConfig({
     "/models": { proxy: `${TRANSCRIBER_API}/models` },
     "/config": { proxy: `${TRANSCRIBER_API}/config` },
     "/stats": { proxy: `${TRANSCRIBER_API}/stats` },
+    "/version": { proxy: `${TRANSCRIBER_API}/version` },
     "/healthz": { proxy: `${TRANSCRIBER_API}/healthz` },
     "/readyz": { proxy: `${TRANSCRIBER_API}/readyz` },
   },

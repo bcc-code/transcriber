@@ -1,5 +1,16 @@
 <script setup lang="ts">
 const { theme, toggle } = useTheme();
+
+// Build identity of the running server, so you can tell which commit is deployed.
+const { data: version } = useAsyncData("version", () => useApi().getVersion(), {
+    server: false,
+});
+const shortCommit = computed(() => {
+    const c = version.value?.commit;
+    if (!c) return "";
+    const s = c === "unknown" ? c : c.slice(0, 7);
+    return version.value?.modified ? `${s}-dirty` : s;
+});
 </script>
 
 <template>
@@ -11,6 +22,13 @@ const { theme, toggle } = useTheme();
                     Transcriber
                 </NuxtLink>
                 <nav class="ml-auto flex items-center gap-4 text-body-3">
+                    <span
+                        v-if="shortCommit"
+                        class="font-mono text-text-muted"
+                        :title="`Commit ${version?.commit}${version?.build_time ? `, built ${version.build_time}` : ''}`"
+                    >
+                        {{ shortCommit }}
+                    </span>
                     <DesignButton
                         :aria-label="`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`"
                         :title="`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`"

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"os"
 
 	"transcriber/internal/hfcache"
@@ -83,6 +84,7 @@ func buildRegistry(defaultID string, whisperNoGPU bool) *transcriber.Registry {
 func registerElevenLabs(r *transcriber.Registry) {
 	key := os.Getenv("ELEVENLABS_API_KEY")
 	if key == "" {
+		slog.Info("elevenlabs backends disabled: ELEVENLABS_API_KEY not set")
 		return
 	}
 	models := []struct{ id, modelID, name string }{
@@ -101,7 +103,13 @@ func registerElevenLabs(r *transcriber.Registry) {
 	}
 	// Unversioned ID follows ELEVENLABS_DEFAULT_MODEL so the server owner can move
 	// clients that don't pin a version.
-	r.Alias("elevenlabs-scribe", envOr("ELEVENLABS_DEFAULT_MODEL", "elevenlabs-scribe-v2"))
+	def := envOr("ELEVENLABS_DEFAULT_MODEL", "elevenlabs-scribe-v2")
+	r.Alias("elevenlabs-scribe", def)
+	ids := make([]string, len(models))
+	for i, m := range models {
+		ids[i] = m.id
+	}
+	slog.Info("elevenlabs backends enabled", "models", ids, "elevenlabs-scribe", def)
 }
 
 func envOr(key, def string) string {
