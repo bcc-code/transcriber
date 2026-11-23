@@ -72,6 +72,9 @@ Go code. Server settings come from flags; per-machine paths from env vars.
 | `XDG_CACHE_HOME`    | `~/.cache`                      | base for the HF cache (`<root>/transcriber/hf/<repo>/<file>`).                                                                                      |
 | `ELEVENLABS_API_KEY` | _(unset)_ | enables the ElevenLabs Scribe backends (see below). Unset = not registered. |
 | `ELEVENLABS_DEFAULT_MODEL` | `elevenlabs-scribe-v2` | which Scribe adapter the unversioned `elevenlabs-scribe` ID points to. |
+| `OPENROUTER_KEY` | _(unset)_ | enables the OpenRouter backends (see below). Unset = not registered. |
+| `OPENROUTER_MODELS` | _(unset → Norwegian-capable list)_ | comma-separated OpenRouter model slugs to register instead of the built-in list. |
+| `OPENROUTER_DEFAULT_MODEL` | `openai/whisper-large-v3` | which model the bare `openrouter` ID points to. |
 
 ## API
 
@@ -142,6 +145,22 @@ because Scribe handles long audio itself and no chunking is needed. On v2 the
 `prompt` is sent as keyterms: comma-, newline- or semicolon-separated entries
 of at most 5 words or 50 characters. Anything longer is ignored. Audio for these
 jobs leaves the host.
+
+### OpenRouter
+
+With `OPENROUTER_KEY` set, OpenRouter speech-to-text models are registered as
+`openrouter/<slug>`, for example `openrouter/openai/whisper-large-v3`. The
+set is a hardcoded list of models whose vendors document Norwegian support
+(`openRouterNorwegianModels` in `cmd/transcriber/models.go`). At boot it is
+checked against OpenRouter's live model list and withdrawn models are skipped.
+`OPENROUTER_MODELS` replaces the list. `openrouter` alone resolves to
+`OPENROUTER_DEFAULT_MODEL`. Jobs use OpenRouter's `/api/v1/audio/transcriptions` endpoint with
+`verbose_json` and segment and word timestamps. Input is split into 10-minute
+chunks, and up to 4 chunks run at once. Each chunk is transcoded to 16 kHz mono
+Opus, which keeps every upload far below the 25 MB limit. `language` and
+`prompt` are passed through. Segment and word timestamps depend on the
+provider. A provider that returns only text produces one segment with no
+timing. Audio for these jobs leaves the host.
 
 ### Additive endpoints
 

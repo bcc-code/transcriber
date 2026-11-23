@@ -4,11 +4,14 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
+	"time"
 
 	"transcriber/internal/hfcache"
 	"transcriber/internal/transcriber"
 	"transcriber/internal/transcriber/chunked"
 	"transcriber/internal/transcriber/elevenlabs"
+	"transcriber/internal/transcriber/openrouter"
 	"transcriber/internal/transcriber/stub"
 	"transcriber/internal/transcriber/whispercpp"
 )
@@ -74,6 +77,7 @@ func buildRegistry(defaultID string, whisperNoGPU bool) *transcriber.Registry {
 	r.Alias("NbAiLab/nb-whisper-tiny", "nb-whisper-large")
 
 	registerElevenLabs(r)
+	registerOpenRouter(r)
 
 	return r
 }
@@ -110,6 +114,130 @@ func registerElevenLabs(r *transcriber.Registry) {
 		ids[i] = m.id
 	}
 	slog.Info("elevenlabs backends enabled", "models", ids, "elevenlabs-scribe", def)
+}
+
+const openRouterFallbackModel = "openai/whisper-large-v3"
+
+// registerOpenRouter adds one adapter per OpenRouter speech-to-text model,
+// under the ID "openrouter/<slug>" (e.g. "openrouter/openai/whisper-large-v3"),
+// so it never collides with the local "openai/whisper-*" aliases. Each adapter
+// is wrapped in chunked to stay far below the endpoint's 25 MB upload cap.
+//
+// Which models: see openRouterModels. Skipped entirely without an API key.
+func registerOpenRouter(r *transcriber.Registry) {
+	key := os.Getenv("OPENROUTER_KEY")
+	if key == "" {
+		slog.Info("openrouter backends disabled: OPENROUTER_KEY not set")
+		return
+	}
+
+	models, source := openRouterModels(key)
+	if len(models) == 0 {
+		slog.Warn("openrouter backends disabled: no models", "source", source)
+		return
+	}
+
+	ids := make([]string, 0, len(models))
+	for _, m := range models {
+		id := "openrouter/" + m.ID
+		name := m.Name
+		if name == "" {
+			name = m.ID
+		}
+		r.Register(chunked.New(
+			openrouter.New(openrouter.Config{
+				ID:          id,
+				DisplayName: "OpenRouter " + name,
+				APIKey:      key,
+				Model:       m.ID,
+			}),
+			// 10-minute chunks are ~2.4 MB of Opus; chunks run concurrently
+			// since the work happens remotely.
+			chunked.Config{ChunkLengthSec: 600, Parallelism: 4},
+		))
+		ids = append(ids, id)
+	}
+
+	// "openrouter" resolves to OPENROUTER_DEFAULT_MODEL when that model is
+	// registered, otherwise to the first one.
+	def := ids[0]
+	want := "openrouter/" + strings.TrimPrefix(envOr("OPENROUTER_DEFAULT_MODEL", openRouterFallbackModel), "openrouter/")
+	if _, ok := r.Get(want); ok {
+		def = want
+	} else if os.Getenv("OPENROUTER_DEFAULT_MODEL") != "" {
+		slog.Warn("OPENROUTER_DEFAULT_MODEL not available; using first model", "requested", want, "openrouter", def)
+	}
+	r.Alias("openrouter", def)
+	slog.Info("openrouter backends enabled", "source", source, "count", len(ids), "models", ids, "openrouter", def)
+}
+
+// openRouterNorwegianModels are the OpenRouter transcription models whose
+// vendor documents Norwegian support (checked 2026-11-23). Only these are
+// registered. Deliberately left out although they list Norwegian:
+// elevenlabs/scribe-v2-medical (clinical vocabulary), assemblyai/universal-3-5-pro
+// (deprecated), nvidia/nemotron-3.5-transcribe (listed as "may need
+// fine-tuning", 63.8% FLEURS WER).
+var openRouterNorwegianModels = []string{
+	"assemblyai/universal-3-6-pro",
+	"deepgram/nova-3",
+	"elevenlabs/scribe-v2",
+	"google/chirp-3", // Norwegian is Preview, not GA
+	"google/gemini-3.5-transcribe",
+	"microsoft/mai-transcribe-1.5",
+	"microsoft/mai-transcribe-2",
+	"mistralai/voxtral-mini-transcribe-3-0",
+	"mistralai/voxtral-small-transcribe-3-0",
+	"nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b",
+	"openai/whisper-1",
+	"openai/whisper-large-v3",
+	"openai/whisper-large-v3-turbo",
+	"x-ai/grok-stt-2.0",
+}
+
+// openRouterModels returns the models to register and where they came from.
+// OPENROUTER_MODELS overrides everything. Otherwise the hardcoded Norwegian
+// list is intersected with what OpenRouter lists at boot, so models that
+// were withdrawn are dropped; if the fetch fails the list is used as is.
+func openRouterModels(key string) ([]openrouter.Model, string) {
+	if v := os.Getenv("OPENROUTER_MODELS"); v != "" {
+		var models []openrouter.Model
+		for _, slug := range strings.Split(v, ",") {
+			if slug = strings.TrimSpace(slug); slug != "" {
+				models = append(models, openrouter.Model{ID: slug})
+			}
+		}
+		return models, "OPENROUTER_MODELS"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	listed, err := openrouter.ListTranscriptionModels(ctx, nil, "", key)
+	if err != nil || len(listed) == 0 {
+		slog.Warn("openrouter model list fetch failed; registering hardcoded list unchecked", "err", err)
+		models := make([]openrouter.Model, len(openRouterNorwegianModels))
+		for i, id := range openRouterNorwegianModels {
+			models[i] = openrouter.Model{ID: id}
+		}
+		return models, "hardcoded"
+	}
+
+	byID := make(map[string]openrouter.Model, len(listed))
+	for _, m := range listed {
+		byID[m.ID] = m
+	}
+	var models []openrouter.Model
+	var missing []string
+	for _, id := range openRouterNorwegianModels {
+		if m, ok := byID[id]; ok {
+			models = append(models, m)
+		} else {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		slog.Warn("openrouter models no longer listed; skipped", "models", missing)
+	}
+	return models, "api"
 }
 
 func envOr(key, def string) string {
