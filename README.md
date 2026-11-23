@@ -70,6 +70,8 @@ Go code. Server settings come from flags; per-machine paths from env vars.
 | `NB_WHISPER_MODEL`  | _(unset → fetched from HF)_     | local path override for the `nb-whisper-large` adapter. Unset = auto-download `NbAiLab/nb-whisper-large/ggml-model.bin` via `internal/hfcache`.     |
 | `WHISPER_VAD_MODEL` | _(unset → fetched from HF)_     | local path override for the Silero VAD model used to skip music/silence. Unset = auto-download `ggml-org/whisper-vad/ggml-silero-v5.1.2.bin`.       |
 | `XDG_CACHE_HOME`    | `~/.cache`                      | base for the HF cache (`<root>/transcriber/hf/<repo>/<file>`).                                                                                      |
+| `ELEVENLABS_API_KEY` | _(unset)_ | enables the ElevenLabs Scribe backends (see below). Unset = not registered. |
+| `ELEVENLABS_DEFAULT_MODEL` | `elevenlabs-scribe-v2` | which Scribe adapter the unversioned `elevenlabs-scribe` ID points to. |
 
 ## API
 
@@ -128,6 +130,18 @@ The JSON result includes word-level timestamps. Each segment carries a
 `internal/formats/testdata/golden/transcript.json` for the canonical
 shape — this fixture is the source of truth that every adapter must
 serialize to.
+
+### ElevenLabs Scribe
+
+With `ELEVENLABS_API_KEY` set, the cloud backends `elevenlabs-scribe-v2` and
+`elevenlabs-scribe-v1` are registered. Pass either one as `model` to choose it
+per job. `elevenlabs/scribe_v2` and `elevenlabs/scribe_v1` work as aliases, and
+`elevenlabs-scribe` resolves to `ELEVENLABS_DEFAULT_MODEL`. The input is
+transcoded with ffmpeg to 16 kHz mono Opus and uploaded in a single request,
+because Scribe handles long audio itself and no chunking is needed. On v2 the
+`prompt` is sent as keyterms: comma-, newline- or semicolon-separated entries
+of at most 5 words or 50 characters. Anything longer is ignored. Audio for these
+jobs leaves the host.
 
 ### Additive endpoints
 

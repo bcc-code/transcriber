@@ -1,0 +1,28 @@
+{
+  "language_code": "eng",
+  "language_probability": 0.98,
+  "text": "Hello world. This is a test of the transcription system. Goodbye.",
+  "words": [
+    {"text": "Hello", "start": 0.04, "end": 0.62, "type": "word", "speaker_id": "speaker_0", "logprob": -0.1},
+    {"text": " ", "start": 0.62, "end": 0.62, "type": "spacing", "speaker_id": "speaker_0", "logprob": 0},
+    {"text": "world.", "start": 0.62, "end": 1.24, "type": "word", "speaker_id": "speaker_0", "logprob": -0.1},
+    {"text": " ", "start": 1.24, "end": 1.24, "type": "spacing", "speaker_id": "speaker_0", "logprob": 0},
+    {"text": "This", "start": 1.24, "end": 1.58, "type": "word", "speaker_id": "speaker_0", "logprob": -0.1},
+    {"text": " ", "start": 1.58, "end": 1.58, "type": "spacing", "speaker_id": "speaker_0", "logprob": 0},
+    {"text": "is", "start": 1.58, "end": 1.8, "type": "word", "speaker_id": "speaker_0", "logprob": -0.1},
+    {"text": " ", "start": 1.8, "end": 1.8, "type": "spacing", "speaker_id": "speaker_0", "logprob": 0},
+    {"text": "a", "start": 1.8, "end": 1.94, "type": "word", "speaker_id": "speaker_0", "logprob": -0.1},
+    {"text": " ", "start": 1.94, "end": 1.94, "type": "spacing", "speaker_id": "speaker_0", "logprob": 0},
+    {"text": "test", "start": 1.94, "end": 2.36, "type": "word", "speaker_id": "speaker_0", "logprob": -0.1},
+    {"text": " ", "start": 2.36, "end": 2.36, "type": "spacing", "speaker_id": "speaker_0", "logprob": 0},
+    {"text": "of", "start": 2.36, "end": 2.58, "type": "word", "speaker_id": "speaker_0", "logprob": -0.1},
+    {"text": " ", "start": 2.58, "end": 2.58, "type": "spacing", "speaker_id": "speaker_0", "logprob": 0},
+    {"text": "the", "start": 2.58, "end": 2.82, "type": "word", "speaker_id": "speaker_0", "logprob": -0.1},
+    {"text": " ", "start": 2.82, "end": 2.82, "type": "spacing", "speaker_id": "speaker_0", "logprob": 0},
+    {"text": "transcription", "start": 2.82, "end": 4.2, "type": "word", "speaker_id": "speaker_0", "logprob": -0.1},
+    {"text": " ", "start": 4.2, "end": 4.2, "type": "spacing", "speaker_id": "speaker_0", "logprob": 0},
+    {"text": "system.", "start": 4.2, "end": 5.1, "type": "word", "speaker_id": "speaker_0", "logprob": -0.1},
+    {"text": " ", "start": 5.1, "end": 5.1, "type": "spacing", "speaker_id": "speaker_0", "logprob": 0},
+    {"text": "Goodbye.", "start": 5.1, "end": 6.45, "type": "word", "speaker_id": "speaker_0", "logprob": -0.1}
+  ]
+}

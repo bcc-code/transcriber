@@ -39,6 +39,11 @@ services:
       - "-max-terminal-jobs=${MAX_TERMINAL_JOBS:-200}"
       - "-log-format=${LOG_FORMAT:-json}"
 
+    # Optional ElevenLabs Scribe backend; registered only when the key is set.
+    environment:
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_DEFAULT_MODEL: ${ELEVENLABS_DEFAULT_MODEL:-}
+
     volumes:
       # ggml model cache — first job downloads ~3 GB, this keeps it.
       - models:/var/cache/transcriber

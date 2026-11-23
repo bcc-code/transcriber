@@ -7,6 +7,7 @@ import (
 	"transcriber/internal/hfcache"
 	"transcriber/internal/transcriber"
 	"transcriber/internal/transcriber/chunked"
+	"transcriber/internal/transcriber/elevenlabs"
 	"transcriber/internal/transcriber/stub"
 	"transcriber/internal/transcriber/whispercpp"
 )
@@ -71,7 +72,36 @@ func buildRegistry(defaultID string, whisperNoGPU bool) *transcriber.Registry {
 	r.Alias("NbAiLab/nb-whisper-small", "nb-whisper-large")
 	r.Alias("NbAiLab/nb-whisper-tiny", "nb-whisper-large")
 
+	registerElevenLabs(r)
+
 	return r
+}
+
+// registerElevenLabs adds one adapter per Scribe model so clients choose the
+// model with the request's `model` field (e.g. "elevenlabs-scribe-v1").
+// Skipped entirely without an API key, so /models only lists usable backends.
+func registerElevenLabs(r *transcriber.Registry) {
+	key := os.Getenv("ELEVENLABS_API_KEY")
+	if key == "" {
+		return
+	}
+	models := []struct{ id, modelID, name string }{
+		{"elevenlabs-scribe-v2", "scribe_v2", "ElevenLabs Scribe v2"},
+		{"elevenlabs-scribe-v1", "scribe_v1", "ElevenLabs Scribe v1"},
+	}
+	for _, m := range models {
+		r.Register(elevenlabs.New(elevenlabs.Config{
+			ID:          m.id,
+			DisplayName: m.name,
+			APIKey:      key,
+			ModelID:     m.modelID,
+		}))
+		// ElevenLabs' own model name works too, e.g. "elevenlabs/scribe_v2".
+		r.Alias("elevenlabs/"+m.modelID, m.id)
+	}
+	// Unversioned ID follows ELEVENLABS_DEFAULT_MODEL so the server owner can move
+	// clients that don't pin a version.
+	r.Alias("elevenlabs-scribe", envOr("ELEVENLABS_DEFAULT_MODEL", "elevenlabs-scribe-v2"))
 }
 
 func envOr(key, def string) string {
