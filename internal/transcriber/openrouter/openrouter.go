@@ -12,16 +12,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"transcriber/internal/procutil"
 	"transcriber/internal/transcriber"
+	"transcriber/internal/transcriber/chunked"
 )
 
 const (
@@ -50,10 +53,27 @@ type Config struct {
 	Transcode func(ctx context.Context, inputPath, outPath string) error
 	// RetryBackoff is the base delay between retries (doubled each attempt).
 	RetryBackoff time.Duration
+	// Probe returns the duration in seconds of the uploaded audio. It is only
+	// used for text-only models, to spread the text over the audio. Defaults
+	// to ffprobe; tests override it.
+	Probe func(ctx context.Context, path string) (float64, error)
 }
+
+// mode is how much timing detail is requested. Models differ in what they
+// accept, so the adapter steps down when a model rejects a mode.
+type mode int32
+
+const (
+	modeWords    mode = iota // verbose_json, segment + word timestamps
+	modeSegments             // verbose_json, segment timestamps only
+	modeText                 // json: text only, no timestamps
+)
 
 type Adapter struct {
 	cfg Config
+	// mode only ever moves down. It is shared across calls, so once one chunk
+	// learns what the model supports, the remaining chunks start there.
+	mode atomic.Int32
 }
 
 func New(cfg Config) *Adapter {
@@ -79,6 +99,11 @@ func New(cfg Config) *Adapter {
 	a := &Adapter{cfg: cfg}
 	if a.cfg.Transcode == nil {
 		a.cfg.Transcode = a.transcodeFFmpeg
+	}
+	if a.cfg.Probe == nil {
+		a.cfg.Probe = func(ctx context.Context, path string) (float64, error) {
+			return chunked.ProbeDuration(ctx, "", path)
+		}
 	}
 	return a
 }
@@ -113,7 +138,7 @@ func (a *Adapter) Transcribe(ctx context.Context, req transcriber.Request, onPro
 	}
 	onProgress(0.1)
 
-	body, err := a.postWithRetry(ctx, audioPath, req)
+	body, m, err := a.request(ctx, audioPath, req)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +147,17 @@ func (a *Adapter) Transcribe(ctx context.Context, req transcriber.Request, onPro
 	// Raw response is kept in scratch for debugging (-keep-work-dirs).
 	_ = os.WriteFile(filepath.Join(req.WorkDir, "openrouter_raw.json"), body, 0o644)
 
-	tr, err := parseResponse(body, req.Language)
+	// Text-only responses carry no timing; the audio length lets the parser
+	// spread the sentences over it.
+	var duration float64
+	if m == modeText {
+		if d, err := a.cfg.Probe(ctx, audioPath); err == nil {
+			duration = d
+		} else if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+	tr, err := parseResponse(body, req.Language, duration)
 	if err != nil {
 		return nil, err
 	}
@@ -168,11 +203,64 @@ func (e *apiError) retryable() bool {
 	return e.Status == http.StatusTooManyRequests || e.Status >= 500
 }
 
-func (a *Adapter) postWithRetry(ctx context.Context, audioPath string, req transcriber.Request) ([]byte, error) {
+// request asks for word and segment timestamps, and falls back to segments
+// only when the model rejects word-level timestamps (e.g. Voxtral returns
+// 400 "Word-level segments are not enabled for this model").
+func (a *Adapter) request(ctx context.Context, audioPath string, req transcriber.Request) ([]byte, mode, error) {
+	for {
+		m := mode(a.mode.Load())
+		body, err := a.postWithRetry(ctx, audioPath, req, m)
+		if err == nil {
+			return body, m, nil
+		}
+		next, ok := downgrade(m, err)
+		if !ok {
+			return nil, m, err
+		}
+		// Only ever lower the mode, even if another chunk raced us.
+		for cur := a.mode.Load(); cur < int32(next) && !a.mode.CompareAndSwap(cur, int32(next)); cur = a.mode.Load() {
+		}
+		slog.Info("openrouter model rejected timing mode; stepping down",
+			"model", a.cfg.Model, "from", m, "to", next, "err", err)
+	}
+}
+
+// downgrade picks a lesser mode when err is a 400 rejecting what m asked for:
+// - Voxtral: "Word-level segments are not enabled for this model"
+// - MAI-Transcribe: `does not support response_format "verbose_json". Use "json" instead.`
+func downgrade(m mode, err error) (mode, bool) {
+	var ae *apiError
+	if !errors.As(err, &ae) || ae.Status != http.StatusBadRequest {
+		return m, false
+	}
+	msg := strings.ToLower(ae.Body)
+	switch {
+	case m < modeText && (strings.Contains(msg, "verbose_json") || strings.Contains(msg, "response_format")):
+		return modeText, true
+	case m < modeSegments && strings.Contains(msg, "word") &&
+		(strings.Contains(msg, "segment") || strings.Contains(msg, "timestamp") || strings.Contains(msg, "granularit")):
+		return modeSegments, true
+	}
+	return m, false
+}
+
+func (m mode) String() string {
+	switch m {
+	case modeWords:
+		return "words"
+	case modeSegments:
+		return "segments"
+	case modeText:
+		return "text"
+	}
+	return fmt.Sprintf("mode(%d)", int32(m))
+}
+
+func (a *Adapter) postWithRetry(ctx context.Context, audioPath string, req transcriber.Request, m mode) ([]byte, error) {
 	backoff := a.cfg.RetryBackoff
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		body, err := a.post(ctx, audioPath, req)
+		body, err := a.post(ctx, audioPath, req, m)
 		if err == nil {
 			return body, nil
 		}
@@ -197,7 +285,7 @@ func (a *Adapter) postWithRetry(ctx context.Context, audioPath string, req trans
 	return nil, lastErr
 }
 
-func (a *Adapter) post(ctx context.Context, audioPath string, req transcriber.Request) ([]byte, error) {
+func (a *Adapter) post(ctx context.Context, audioPath string, req transcriber.Request, m mode) ([]byte, error) {
 	f, err := os.Open(audioPath)
 	if err != nil {
 		return nil, err
@@ -207,7 +295,7 @@ func (a *Adapter) post(ctx context.Context, audioPath string, req transcriber.Re
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
 	go func() {
-		pw.CloseWithError(a.writeForm(mw, f, req))
+		pw.CloseWithError(a.writeForm(mw, f, req, m))
 	}()
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.BaseURL+"/audio/transcriptions", pr)
@@ -240,13 +328,23 @@ func (a *Adapter) post(ctx context.Context, audioPath string, req transcriber.Re
 	return body, nil
 }
 
-func (a *Adapter) writeForm(mw *multipart.Writer, audio io.Reader, req transcriber.Request) error {
+func (a *Adapter) writeForm(mw *multipart.Writer, audio io.Reader, req transcriber.Request, m mode) error {
 	fields := [][2]string{
 		{"model", a.cfg.Model},
-		{"response_format", "verbose_json"},
-		{"timestamp_granularities[]", "segment"},
-		{"timestamp_granularities[]", "word"},
 		{"temperature", "0"},
+	}
+	switch m {
+	case modeWords:
+		fields = append(fields,
+			[2]string{"response_format", "verbose_json"},
+			[2]string{"timestamp_granularities[]", "segment"},
+			[2]string{"timestamp_granularities[]", "word"})
+	case modeSegments:
+		fields = append(fields,
+			[2]string{"response_format", "verbose_json"},
+			[2]string{"timestamp_granularities[]", "segment"})
+	default:
+		fields = append(fields, [2]string{"response_format", "json"})
 	}
 	if lang := strings.ToLower(strings.TrimSpace(req.Language)); lang != "" && lang != "auto" {
 		fields = append(fields, [2]string{"language", lang})

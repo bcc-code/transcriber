@@ -37,7 +37,10 @@ type rawWord struct {
 	End   float64 `json:"end"`
 }
 
-func parseResponse(data []byte, fallbackLang string) (*transcriber.Transcription, error) {
+// parseResponse converts a transcription response. duration is the audio
+// length in seconds, used only to estimate timings for text-only responses
+// (0 = unknown).
+func parseResponse(data []byte, fallbackLang string, duration float64) (*transcriber.Transcription, error) {
 	var raw rawResponse
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("openrouter parse: %w", err)
@@ -62,10 +65,12 @@ func parseResponse(data []byte, fallbackLang string) (*transcriber.Transcription
 	} else {
 		segs = fromWords(words)
 	}
-	// Plain-json providers give only text; keep it as one untimed segment so
-	// the transcript is not lost.
+	// Plain-json providers give only text.
 	if len(segs) == 0 && strings.TrimSpace(raw.Text) != "" {
-		segs = []transcriber.Segment{{Text: strings.TrimSpace(raw.Text), End: raw.Duration}}
+		if raw.Duration > 0 {
+			duration = raw.Duration
+		}
+		segs = fromText(raw.Text, duration)
 	}
 	if segs == nil {
 		segs = []transcriber.Segment{}
@@ -161,6 +166,42 @@ func fromWords(words []rawWord) []transcriber.Segment {
 		}
 	}
 	flush()
+	return segs
+}
+
+// fromText splits untimed text into sentences and spreads them over
+// [0, duration] in proportion to their length. The timings are estimates,
+// but they keep chunk stitching working: chunked places each segment by its
+// end time, so a single segment ending at 0 would be dropped for every chunk
+// after the first. With duration unknown, the text becomes one segment.
+func fromText(text string, duration float64) []transcriber.Segment {
+	text = strings.Join(strings.Fields(text), " ")
+	if duration <= 0 {
+		return []transcriber.Segment{{Text: text}}
+	}
+	var sentences []string
+	start := 0
+	for i, r := range text {
+		if (r == '.' || r == '?' || r == '!' || r == '…') && i+1 < len(text) && text[i+1] == ' ' {
+			sentences = append(sentences, text[start:i+1])
+			start = i + 2
+		}
+	}
+	if start < len(text) {
+		sentences = append(sentences, text[start:])
+	}
+
+	total := 0
+	for _, s := range sentences {
+		total += len([]rune(s))
+	}
+	segs := make([]transcriber.Segment, 0, len(sentences))
+	var t float64
+	for _, s := range sentences {
+		end := t + duration*float64(len([]rune(s)))/float64(total)
+		segs = append(segs, transcriber.Segment{ID: len(segs), Text: s, Start: t, End: end})
+		t = end
+	}
 	return segs
 }
 
