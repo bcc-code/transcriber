@@ -173,7 +173,7 @@ func (a *Adapter) Transcribe(ctx context.Context, req transcriber.Request, onPro
 		}
 		return nil, fmt.Errorf("whispercpp output: %w", err)
 	}
-	tr, err := parseJSON(data, req.Language)
+	tr, err := parseJSON(data, req.Language, capture.vad)
 	if err != nil {
 		return nil, err
 	}
@@ -188,6 +188,8 @@ func (a *Adapter) Transcribe(ctx context.Context, req transcriber.Request, onPro
 type stderrCapture struct {
 	done chan struct{}
 	tail []string
+	// vad is the VAD time mapping whisper-cli logged; read only after wait().
+	vad vadMap
 }
 
 func captureStderr(r io.Reader, onProgress transcriber.ProgressFunc) *stderrCapture {
@@ -204,6 +206,10 @@ func captureStderr(r io.Reader, onProgress transcriber.ProgressFunc) *stderrCapt
 						onProgress(float64(pct) / 100.0)
 					}
 				}
+				continue
+			}
+			if span, ok := parseVADSpan(line); ok {
+				c.vad = append(c.vad, span)
 				continue
 			}
 			if strings.TrimSpace(line) == "" {
@@ -348,7 +354,8 @@ func parseHex4(b []byte) (rune, bool) {
 // Whisper vocab: id >= 50256 is a control token, not a word piece.
 const firstSpecialTokenID = 50256
 
-func parseJSON(data []byte, fallbackLang string) (*transcriber.Transcription, error) {
+// vad maps token offsets back to the original timeline when VAD was on.
+func parseJSON(data []byte, fallbackLang string, vad vadMap) (*transcriber.Transcription, error) {
 	var raw rawOutput
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("whispercpp parse: %w", err)
@@ -365,12 +372,24 @@ func parseJSON(data []byte, fallbackLang string) (*transcriber.Transcription, er
 		text := strings.TrimSpace(s.Text)
 		segStart := float64(s.Offsets.From) / 1000.0
 		segEnd := float64(s.Offsets.To) / 1000.0
+		var words []transcriber.Word
+		if len(vad) > 0 {
+			words = mappedTokensToWords(s.Tokens, vad)
+			// whisper.cpp interpolates segment bounds across removed silence;
+			// the mapped words are exact, so tighten the segment to them.
+			if len(words) > 0 {
+				segStart = words[0].Start
+				segEnd = words[len(words)-1].End
+			}
+		} else {
+			words = tokensToWords(s.Tokens, segStart, segEnd)
+		}
 		t.Segments = append(t.Segments, transcriber.Segment{
 			ID:    i,
 			Start: segStart,
 			End:   segEnd,
 			Text:  text,
-			Words: tokensToWords(s.Tokens, segStart, segEnd),
+			Words: words,
 		})
 		sb.WriteString(text)
 		sb.WriteByte(' ')
@@ -379,10 +398,44 @@ func parseJSON(data []byte, fallbackLang string) (*transcriber.Transcription, er
 	return t, nil
 }
 
-// tokensToWords groups BPE tokens into words (leading space marks a new word)
-// and remaps timestamps. With VAD on, token offsets are in VAD-compressed
-// time while segment offsets are in original time — we anchor the first
-// token to segStart and apply the same delta to the rest.
+// mappedTokensToWords groups BPE tokens into words (leading space marks a
+// new word), mapping each token's VAD-buffer offsets to the original timeline.
+func mappedTokensToWords(tokens []rawToken, vad vadMap) []transcriber.Word {
+	var words []transcriber.Word
+	var cur *transcriber.Word
+	flush := func() {
+		if cur == nil {
+			return
+		}
+		cur.Text = strings.TrimSpace(cur.Text)
+		if cur.Text != "" {
+			words = append(words, *cur)
+		}
+		cur = nil
+	}
+	for _, tok := range tokens {
+		if tok.ID >= firstSpecialTokenID {
+			continue
+		}
+		text := string(tok.Text)
+		start := vad.toOriginal(float64(tok.Offsets.From) / 1000.0)
+		end := max(start, vad.toOriginal(float64(tok.Offsets.To)/1000.0))
+		if cur == nil || strings.HasPrefix(text, " ") {
+			flush()
+			cur = &transcriber.Word{Text: text, Start: start, End: end}
+			continue
+		}
+		cur.Text += text
+		cur.End = max(cur.End, end)
+	}
+	flush()
+	return words
+}
+
+// tokensToWords groups BPE tokens into words when no VAD mapping is known.
+// If VAD was on but its mapping wasn't logged, token offsets are in
+// VAD-compressed time while segment offsets are in original time; anchoring
+// the first token to segStart is then only right up to the first pause.
 func tokensToWords(tokens []rawToken, segStart, segEnd float64) []transcriber.Word {
 	if len(tokens) == 0 {
 		return nil

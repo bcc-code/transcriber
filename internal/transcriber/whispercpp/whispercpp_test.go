@@ -17,7 +17,7 @@ func TestParseJSONMatchesGoldens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read raw: %v", err)
 	}
-	tr, err := parseJSON(raw, "")
+	tr, err := parseJSON(raw, "", nil)
 	if err != nil {
 		t.Fatalf("parseJSON: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestParseJSONMatchesGoldens(t *testing.T) {
 
 func TestParseJSONLanguageFallback(t *testing.T) {
 	raw := `{"result": {"language": ""}, "transcription": []}`
-	tr, err := parseJSON([]byte(raw), "no")
+	tr, err := parseJSON([]byte(raw), "no", nil)
 	if err != nil {
 		t.Fatalf("parseJSON: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestParseJSONReconstructsSplitUTF8Tokens(t *testing.T) {
 		"}]" +
 		"}")
 
-	tr, err := parseJSON(raw, "no")
+	tr, err := parseJSON(raw, "no", nil)
 	if err != nil {
 		t.Fatalf("parseJSON: %v", err)
 	}
