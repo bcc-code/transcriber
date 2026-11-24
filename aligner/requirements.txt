@@ -1,0 +1,2 @@
+# torch comes from the pytorch/pytorch base image.
+transformers==5.24.0

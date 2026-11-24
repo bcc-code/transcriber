@@ -236,6 +236,7 @@ inspecting a bad transcription.
 | Mount                                          | Purpose                                                                                                                                              |
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `models:/var/cache/transcriber`                | ggml whisper.cpp models. Survives restarts — first job downloads ~3 GB.                                                                               |
+| `aligner-models:/models` _(aligner service)_    | wav2vec2 alignment models. The Norwegian one (~4 GB) downloads on first start (`ALIGN_PRELOAD=no`); others on first use.                              |
 | `${STORAGE_PATH}:${STORAGE_PATH}`              | Audio inputs (`path`) and transcript outputs (`output_path`). Mounted at the same path inside and out, because request paths resolve in the container. |
 | `${SOURCE_PATH}:${SOURCE_PATH}:ro`             | Read-only source audio (default `/mnt/isilon`). Same-path rule; must exist on the host.                                                              |
 | `./prompts:/app/prompts:ro` _(optional)_       | Replaces the default prompts baked into the image (`prompts/whisper.txt`, `prompts/keyterms.txt`). Uncomment in `docker-compose.yml`.                 |

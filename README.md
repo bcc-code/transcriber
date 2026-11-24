@@ -73,6 +73,7 @@ Go code. Server settings come from flags; per-machine paths from env vars.
 | `XDG_CACHE_HOME`    | `~/.cache`                      | base for the HF cache (`<root>/transcriber/hf/<repo>/<file>`).                                                                                      |
 | `ELEVENLABS_API_KEY` | _(unset)_ | enables the ElevenLabs Scribe backends (see below). Unset = not registered. |
 | `ELEVENLABS_DEFAULT_MODEL` | `elevenlabs-scribe-v2` | which Scribe adapter the unversioned `elevenlabs-scribe` ID points to. |
+| `ALIGNER_URL` | _(unset → off; compose sets `http://aligner:8000`)_ | forced-aligner service that re-times the local whisper models' words. See [Forced alignment](#forced-alignment). |
 | `OPENROUTER_KEY` | _(unset)_ | enables the OpenRouter backends (see below). Unset = not registered. |
 | `OPENROUTER_MODELS` | _(unset → Norwegian-capable list)_ | comma-separated OpenRouter model slugs to register instead of the built-in list. |
 | `OPENROUTER_DEFAULT_MODEL` | `openai/whisper-large-v3` | which model the bare `openrouter` ID points to. |
@@ -162,6 +163,27 @@ Opus, which keeps every upload far below the 25 MB limit. `language` and
 `prompt` are passed through. Segment and word timestamps depend on the
 provider. A provider that returns only text produces one segment with no
 timing. Audio for these jobs leaves the host.
+
+### Forced alignment
+
+With `ALIGNER_URL` set, the local whisper models (`whisper-cpp-large-v3`,
+`nb-whisper-large`) send their result to the aligner service (`aligner/`)
+after transcription. It keeps whisper's text and moves each word's timestamps
+to where a wav2vec2 CTC model finds it in the audio, which fixes words whisper
+placed at the wrong side of a pause. Segment bounds follow their words.
+Subtitle cues are built from word times, so they follow too.
+
+Models per language (override with `ALIGN_MODELS`): Norwegian
+`NbAiLab/nb-wav2vec2-1b-bokmaal-v2` (`no`/`nb`), `NbAiLab/nb-wav2vec2-300m-nynorsk`
+(`nn`), and `jonatasgrosman/wav2vec2-large-xlsr-53-*` for `en`, `de`, `nl`.
+Words with no letters the model knows, such as bare numbers, keep whisper's
+time. Alignment is best effort: if the aligner is down, has no model for the
+language or errors, the job completes with whisper's timestamps and a warning
+is logged. Cloud backends are not aligned.
+
+The aligner reads the job's audio path itself, so it needs the same mounts as
+the transcriber. It has no authentication; docker-compose keeps it on the
+internal network.
 
 ### Additive endpoints
 

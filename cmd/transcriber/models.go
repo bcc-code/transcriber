@@ -9,6 +9,7 @@ import (
 
 	"transcriber/internal/hfcache"
 	"transcriber/internal/transcriber"
+	"transcriber/internal/transcriber/aligned"
 	"transcriber/internal/transcriber/chunked"
 	"transcriber/internal/transcriber/elevenlabs"
 	"transcriber/internal/transcriber/openrouter"
@@ -28,7 +29,19 @@ func buildRegistry(defaultID string, whisperNoGPU bool) *transcriber.Registry {
 		return cache.Get(ctx, "ggml-org/whisper-vad", "ggml-silero-v5.1.2.bin")
 	}
 
-	r.Register(chunked.New(
+	// Local whisper models get their words re-timed by the forced aligner
+	// service when ALIGNER_URL is set (see aligner/).
+	local := func(t transcriber.Transcriber) transcriber.Transcriber { return t }
+	if url := os.Getenv("ALIGNER_URL"); url != "" {
+		local = func(t transcriber.Transcriber) transcriber.Transcriber {
+			return aligned.New(t, aligned.Config{URL: url})
+		}
+		slog.Info("forced alignment enabled for local whisper models", "url", url)
+	} else {
+		slog.Info("forced alignment disabled: ALIGNER_URL not set")
+	}
+
+	r.Register(local(chunked.New(
 		whispercpp.New(whispercpp.Config{
 			ID:          "whisper-cpp-large-v3",
 			DisplayName: "OpenAI Whisper large-v3",
@@ -44,9 +57,9 @@ func buildRegistry(defaultID string, whisperNoGPU bool) *transcriber.Registry {
 			NoGPU:           whisperNoGPU,
 		}),
 		chunked.Config{},
-	))
+	)))
 
-	r.Register(chunked.New(
+	r.Register(local(chunked.New(
 		whispercpp.New(whispercpp.Config{
 			ID:          "nb-whisper-large",
 			DisplayName: "NB-Whisper large (Norwegian)",
@@ -62,7 +75,7 @@ func buildRegistry(defaultID string, whisperNoGPU bool) *transcriber.Registry {
 			NoGPU:           whisperNoGPU,
 		}),
 		chunked.Config{},
-	))
+	)))
 
 	// Sub-large sizes upgrade to large — matches the old runner's coercion behavior.
 	r.Alias("openai/whisper-large-v3", "whisper-cpp-large-v3")

@@ -47,6 +47,10 @@ services:
       OPENROUTER_KEY: ${OPENROUTER_KEY:-}
       OPENROUTER_MODELS: ${OPENROUTER_MODELS:-}
       OPENROUTER_DEFAULT_MODEL: ${OPENROUTER_DEFAULT_MODEL:-}
+      # Forced alignment of the local whisper models' words (aligner service
+      # below). Set ALIGNER_URL= (empty) in .env to turn it off. If the
+      # aligner is down, jobs still complete with whisper's own timestamps.
+      ALIGNER_URL: ${ALIGNER_URL-http://aligner:8000}
 
     volumes:
       # ggml model cache — first job downloads ~3 GB, this keeps it.
@@ -78,5 +82,40 @@ services:
               count: all
               capabilities: [gpu]
 
+  # Forced aligner (aligner/): re-times words from the local whisper models
+  # with wav2vec2. Only reachable from the transcriber over the compose
+  # network; it has no auth and reads any path it is given, so don't publish
+  # its port. It reads the audio itself, so it needs the same mounts.
+  aligner:
+    image: ${ALIGNER_IMAGE:-ghcr.io/bcc-code/transcriber-aligner:latest}
+    build:
+      context: ./aligner
+    restart: unless-stopped
+    environment:
+      # Load the Norwegian model at startup instead of on the first job
+      # (first start downloads ~4 GB into the aligner-models volume).
+      ALIGN_PRELOAD: ${ALIGN_PRELOAD-no}
+      # Per-language model overrides, e.g. "no=NbAiLab/nb-wav2vec2-300m-bokmaal".
+      ALIGN_MODELS: ${ALIGN_MODELS:-}
+    volumes:
+      - aligner-models:/models
+      - ${STORAGE_PATH:-/mnt/storage}:${STORAGE_PATH:-/mnt/storage}:ro
+      - ${SOURCE_PATH:-/mnt/isilon}:${SOURCE_PATH:-/mnt/isilon}:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      # Model download on first start.
+      start_period: 600s
+      retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
 volumes:
   models:
+  aligner-models:
