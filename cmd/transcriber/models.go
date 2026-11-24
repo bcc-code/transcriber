@@ -176,8 +176,10 @@ func registerOpenRouter(r *transcriber.Registry) {
 // vendor documents Norwegian support (checked 2026-11-23). Only these are
 // registered. Deliberately left out although they list Norwegian:
 // elevenlabs/scribe-v2-medical (clinical vocabulary), assemblyai/universal-3-5-pro
-// (deprecated). nvidia/nemotron-3.5-transcribe is listed as "may need
-// fine-tuning" (63.8% FLEURS WER) but is included for evaluation.
+// (deprecated), nvidia/nemotron-3.5-transcribe and
+// nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b (no Norwegian ASR in the
+// model card's support matrix; in testing the 30B model transcribed Norwegian
+// as a mix of Swedish and English).
 var openRouterNorwegianModels = []string{
 	"assemblyai/universal-3-6-pro",
 	"deepgram/nova-3",
@@ -188,8 +190,6 @@ var openRouterNorwegianModels = []string{
 	"microsoft/mai-transcribe-2",
 	"mistralai/voxtral-mini-transcribe-3-0",
 	"mistralai/voxtral-small-transcribe-3-0",
-	"nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b",
-	"nvidia/nemotron-3.5-transcribe", // weak Norwegian; evaluation only
 	"openai/whisper-1",
 	"openai/whisper-large-v3",
 	"openai/whisper-large-v3-turbo",
