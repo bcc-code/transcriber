@@ -137,12 +137,12 @@ serialize to.
 
 ### ElevenLabs Scribe
 
-With `ELEVENLABS_API_KEY` set, the cloud backends `elevenlabs-scribe-v2` and
-`elevenlabs-scribe-v1` are registered. Pass either one as `model` to choose it
-per job. `elevenlabs/scribe_v2` and `elevenlabs/scribe_v1` work as aliases, and
+With `ELEVENLABS_API_KEY` set, the cloud backends `elevenlabs-scribe-v3`, `elevenlabs-scribe-v2` and
+`elevenlabs-scribe-v1` are registered. Pass any of them as `model` to choose it
+per job. `elevenlabs/scribe_v3`, `elevenlabs/scribe_v2` and `elevenlabs/scribe_v1` work as aliases, and
 `elevenlabs-scribe` resolves to `ELEVENLABS_DEFAULT_MODEL`. The input is
 transcoded with ffmpeg to 16 kHz mono Opus and uploaded in a single request,
-because Scribe handles long audio itself and no chunking is needed. On v2 the
+because Scribe handles long audio itself and no chunking is needed. On v2 and v3 the
 `prompt` is sent as keyterms: comma-, newline- or semicolon-separated entries
 of at most 5 words or 50 characters. Anything longer is ignored. Audio for these
 jobs leaves the host.

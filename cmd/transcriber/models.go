@@ -92,6 +92,7 @@ func registerElevenLabs(r *transcriber.Registry) {
 		return
 	}
 	models := []struct{ id, modelID, name string }{
+		{"elevenlabs-scribe-v3", "scribe_v3", "ElevenLabs Scribe v3"},
 		{"elevenlabs-scribe-v2", "scribe_v2", "ElevenLabs Scribe v2"},
 		{"elevenlabs-scribe-v1", "scribe_v1", "ElevenLabs Scribe v1"},
 	}
