@@ -17,7 +17,10 @@ const prompt = ref("");
 const PROMPT_MAX = 1000;
 
 const models = ref<ModelInfo[]>([]);
-const defaultPrompt = ref("");
+// Keyterm models (Scribe, nova-3) get a different default than Whisper.
+const defaultPrompt = computed(
+    () => models.value.find((m) => m.id === model.value)?.default_prompt ?? "",
+);
 const submitting = ref(false);
 const error = ref<string | null>(null);
 
@@ -53,7 +56,6 @@ onMounted(async () => {
         models.value = modelList;
         const def = models.value.find((m) => m.default);
         model.value = def?.id ?? models.value[0]?.id ?? "";
-        defaultPrompt.value = config.default_prompt;
 
         // Seed the language dropdown from the server's -default-language, so
         // a user-facing default matches what the server would have used anyway.

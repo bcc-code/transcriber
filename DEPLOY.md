@@ -238,7 +238,7 @@ inspecting a bad transcription.
 | `models:/var/cache/transcriber`                | ggml whisper.cpp models. Survives restarts — first job downloads ~3 GB.                                                                               |
 | `${STORAGE_PATH}:${STORAGE_PATH}`              | Audio inputs (`path`) and transcript outputs (`output_path`). Mounted at the same path inside and out, because request paths resolve in the container. |
 | `${SOURCE_PATH}:${SOURCE_PATH}:ro`             | Read-only source audio (default `/mnt/isilon`). Same-path rule; must exist on the host.                                                              |
-| `./prompt.txt:/app/prompt.txt:ro` _(optional)_ | Default prompt file. Uncomment in `docker-compose.yml`. Without it, only requests carrying their own `prompt` get one.                                 |
+| `./prompts:/app/prompts:ro` _(optional)_       | Replaces the default prompts baked into the image (`prompts/whisper.txt`, `prompts/keyterms.txt`). Uncomment in `docker-compose.yml`.                 |
 
 Env vars baked into the image:
 

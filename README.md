@@ -56,7 +56,8 @@ Go code. Server settings come from flags; per-machine paths from env vars.
 | `-workers`             | `2`          | concurrent transcription jobs                                                                                                                                                         |
 | `-callback-workers`    | `2`          | webhook delivery goroutines                                                                                                                                                           |
 | `-default-model`       | `stub`       | adapter ID used when the request omits `model`                                                                                                                                        |
-| `-default-prompt-file` | `prompt.txt` | file whose contents are used as the prompt when the request omits one; missing file = no default. A non-empty `prompt` in the request fully overrides it                              |
+| `-default-prompt-file` | `prompts/whisper.txt` | free-text prompt used when the request omits one, for Whisper-style models; missing file = no default. A non-empty `prompt` in the request fully overrides it |
+| `-default-keyterms-file` | `prompts/keyterms.txt` | keyterm list used instead of the free-text prompt for keyterm models (`elevenlabs-*`, `openrouter/deepgram/*`, `openrouter/elevenlabs/*`, `openrouter/assemblyai/*`); missing file = those models get the free-text prompt |
 | `-job-timeout`         | `30m`        | wall-clock cap per job; on expiry the worker cancels the subprocess and marks the job `FAILED` with `error: "timeout"`. Per-request `timeout_seconds` overrides this. `<= 0` disables |
 | `-max-terminal-jobs`   | `20`         | how many finished jobs (completed/failed/canceled) to retain in memory; `<= 0` disables the cap                                                                                       |
 | `-log-format`          | `text`       | `text` for human-readable output (dev), `json` for structured logs (prod). The Dockerfile sets `json`                                                                                 |
@@ -167,7 +168,8 @@ timing. Audio for these jobs leaves the host.
 - `GET  /transcription/jobs` — list all jobs
 - `DELETE /transcription/job/{id}` — cancel a queued or running job
 - `GET  /models` — list registered adapters
-- `GET  /config` — server-side defaults (currently `default_prompt`)
+- `GET  /config` — server-side defaults (`default_prompt`, `default_keyterms`, `default_language`)
+- `GET  /models` also reports each model's `prompt_style` (`text` or `keyterms`) and the `default_prompt` it gets
 - `GET  /healthz`, `GET /readyz`
 
 ## Adding a new backend

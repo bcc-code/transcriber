@@ -145,7 +145,12 @@ paths:
               schema:
                 type: object
                 properties:
-                  default_prompt: { type: string }
+                  default_prompt:
+                    type: string
+                    description: Free-text prompt for Whisper-style models.
+                  default_keyterms:
+                    type: string
+                    description: Keyterm list for keyterm models (empty = they get `default_prompt`).
                   default_language: { type: string, example: "no" }
                 required: [default_prompt, default_language]
 
@@ -338,6 +343,13 @@ components:
         id: { type: string }
         name: { type: string }
         default: { type: boolean }
+        prompt_style:
+          type: string
+          enum: [text, keyterms]
+          description: Prompt shape the model uses best — free text (Whisper) or a comma/newline separated keyterm list.
+        default_prompt:
+          type: string
+          description: Prompt this model gets when a request omits `prompt`.
 
     Stats:
       type: object

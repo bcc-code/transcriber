@@ -16,12 +16,12 @@ type Server struct {
 	store           *jobs.Store
 	queue           *jobs.Queue
 	registry        *transcriber.Registry
-	defaultPrompt   string
+	defaultPrompts  transcriber.DefaultPrompts
 	defaultLanguage string
 }
 
-func NewServer(store *jobs.Store, queue *jobs.Queue, registry *transcriber.Registry, defaultPrompt, defaultLanguage string) *Server {
-	return &Server{store: store, queue: queue, registry: registry, defaultPrompt: defaultPrompt, defaultLanguage: defaultLanguage}
+func NewServer(store *jobs.Store, queue *jobs.Queue, registry *transcriber.Registry, defaultPrompts transcriber.DefaultPrompts, defaultLanguage string) *Server {
+	return &Server{store: store, queue: queue, registry: registry, defaultPrompts: defaultPrompts, defaultLanguage: defaultLanguage}
 }
 
 // Routes mounts staticHandler at "/" when non-nil; API patterns take precedence.
@@ -83,7 +83,9 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 
 	prompt := in.Prompt
 	if prompt == "" {
-		prompt = s.defaultPrompt
+		// Resolve aliases so e.g. "elevenlabs-scribe" gets the keyterm list.
+		adapter, _ := s.registry.Get(model)
+		prompt = s.defaultPrompts.For(adapter.ID())
 	}
 
 	language := in.Language
@@ -157,9 +159,11 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 type modelInfo struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Default bool   `json:"default"`
+	ID            string                  `json:"id"`
+	Name          string                  `json:"name"`
+	Default       bool                    `json:"default"`
+	PromptStyle   transcriber.PromptStyle `json:"prompt_style"`
+	DefaultPrompt string                  `json:"default_prompt"`
 }
 
 func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
@@ -167,14 +171,21 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	models := s.registry.List()
 	out := make([]modelInfo, 0, len(models))
 	for _, m := range models {
-		out = append(out, modelInfo{ID: m.ID(), Name: m.Name(), Default: m.ID() == defaultID})
+		out = append(out, modelInfo{
+			ID:            m.ID(),
+			Name:          m.Name(),
+			Default:       m.ID() == defaultID,
+			PromptStyle:   transcriber.PromptStyleFor(m.ID()),
+			DefaultPrompt: s.defaultPrompts.For(m.ID()),
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) config(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
-		"default_prompt":   s.defaultPrompt,
+		"default_prompt":   s.defaultPrompts.Text,
+		"default_keyterms": s.defaultPrompts.Keyterms,
 		"default_language": s.defaultLanguage,
 	})
 }

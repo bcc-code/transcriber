@@ -28,7 +28,7 @@ local_test
 # Per-developer compose overrides (e.g. mapping local_test → /mnt/storage)
 docker-compose.override.yml
 
-# Default prompt file (deployment-specific vocabulary)
+# Legacy single prompt file; defaults now live in prompts/
 prompt.txt
 
 # Compiled binary from `make build`

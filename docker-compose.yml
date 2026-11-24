@@ -59,8 +59,9 @@ services:
       # Read-only source share (audio in). Same-path rule as above. Must exist
       # on the host too, or Docker creates it as an empty directory.
       - ${SOURCE_PATH:-/mnt/isilon}:${SOURCE_PATH:-/mnt/isilon}:ro
-      # Optional default prompt (vocabulary hints). Uncomment to use.
-      # - ./prompt.txt:/app/prompt.txt:ro
+      # Default prompts are baked into the image from prompts/. Uncomment to
+      # edit them without rebuilding.
+      # - ./prompts:/app/prompts:ro
 
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:${PORT:-8888}/healthz"]

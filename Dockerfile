@@ -81,7 +81,8 @@ COPY --from=go-build /out/transcriber /usr/local/bin/transcriber
 WORKDIR /app
 EXPOSE 8888
 
-# `prompt.txt` is optional; mount one in if you want a default prompt.
+# Default prompts (BCC vocabulary). Mount over /app/prompts to replace them.
+COPY prompts ./prompts
 # Flags come from docker-compose.yml (driven by .env); these defaults apply
 # when running the image directly with `docker run`.
 ENTRYPOINT ["/usr/local/bin/transcriber"]

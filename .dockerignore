@@ -23,7 +23,7 @@ local_test
 .env.*
 !.env.example
 
-# Deployment-specific prompt — mounted at runtime, not baked in
+# Legacy single prompt file; defaults now live in prompts/
 prompt.txt
 
 # Pre-built binary

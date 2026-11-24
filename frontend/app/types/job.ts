@@ -38,6 +38,8 @@ export interface ModelInfo {
   id: string;
   name: string;
   default: boolean;
+  prompt_style: "text" | "keyterms";
+  default_prompt: string;
 }
 
 export interface VersionInfo {
@@ -48,5 +50,6 @@ export interface VersionInfo {
 
 export interface ServerConfig {
   default_prompt: string;
+  default_keyterms: string;
   default_language: string;
 }

@@ -28,7 +28,8 @@ func main() {
 	callbackWorkers := flag.Int("callback-workers", 2, "number of webhook delivery goroutines")
 	defaultModel := flag.String("default-model", "stub", "model adapter ID to use when the request omits `model`")
 	defaultLanguage := flag.String("default-language", "", "ISO 639-1 language hint applied when the request omits `language` (empty or `auto` = let the model detect)")
-	defaultPromptFile := flag.String("default-prompt-file", "prompt.txt", "path to a file whose contents are used as the prompt when the request omits one (missing file = no default prompt)")
+	defaultPromptFile := flag.String("default-prompt-file", "prompts/whisper.txt", "free-text prompt used when the request omits one, for Whisper-style models (missing file = no default prompt)")
+	defaultKeytermsFile := flag.String("default-keyterms-file", "prompts/keyterms.txt", "comma/newline separated keyterms used when the request omits a prompt, for keyterm models such as ElevenLabs Scribe and Deepgram (missing file = fall back to -default-prompt-file)")
 	maxTerminalJobs := flag.Int("max-terminal-jobs", 20, "how many finished jobs (completed/failed/canceled) to retain in memory; <= 0 disables the cap")
 	jobTimeout := flag.Duration("job-timeout", 30*time.Minute, "default wall-clock timeout per job; per-request timeout_seconds overrides this; <= 0 disables")
 	logFormat := flag.String("log-format", "text", "log handler: text (human-readable, dev) or json (structured, prod)")
@@ -50,19 +51,9 @@ func main() {
 	}
 	slog.SetDefault(slog.New(handler))
 
-	var defaultPrompt string
-	if *defaultPromptFile != "" {
-		b, err := os.ReadFile(*defaultPromptFile)
-		switch {
-		case err == nil:
-			defaultPrompt = strings.TrimSpace(string(b))
-			slog.Info("loaded default prompt", "path", *defaultPromptFile, "bytes", len(defaultPrompt))
-		case os.IsNotExist(err):
-			slog.Info("no default prompt file found", "path", *defaultPromptFile)
-		default:
-			slog.Error("reading default prompt file", "path", *defaultPromptFile, "err", err)
-			os.Exit(1)
-		}
+	defaultPrompts := transcriber.DefaultPrompts{
+		Text:     readPromptFile(*defaultPromptFile, "prompt"),
+		Keyterms: readPromptFile(*defaultKeytermsFile, "keyterms"),
 	}
 
 	registry := buildRegistry(*defaultModel, *whisperNoGPU)
@@ -98,7 +89,7 @@ func main() {
 	})
 	pool.Start(ctx)
 
-	srv := api.NewServer(store, queue, registry, defaultPrompt, normalizedDefaultLang)
+	srv := api.NewServer(store, queue, registry, defaultPrompts, normalizedDefaultLang)
 	addr := fmt.Sprintf(":%d", *port)
 	httpSrv := &http.Server{
 		Addr:              addr,
@@ -143,4 +134,26 @@ func main() {
 	pool.Wait()
 	notifier.Shutdown()
 	slog.Info("shutdown complete")
+}
+
+// readPromptFile returns the trimmed contents of path, or "" when path is
+// empty or the file does not exist. Any other read error is fatal.
+func readPromptFile(path, kind string) string {
+	if path == "" {
+		return ""
+	}
+	b, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		p := strings.TrimSpace(string(b))
+		slog.Info("loaded default "+kind, "path", path, "bytes", len(p))
+		return p
+	case os.IsNotExist(err):
+		slog.Info("no default "+kind+" file found", "path", path)
+		return ""
+	default:
+		slog.Error("reading default "+kind+" file", "path", path, "err", err)
+		os.Exit(1)
+		return ""
+	}
 }
