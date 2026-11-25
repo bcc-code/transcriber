@@ -11,7 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg curl \
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# The base image's Python is Ubuntu's system python3.12 (no conda since
+# pytorch 2.14), which PEP 668 marks externally managed. torch lives in that
+# environment under /usr/local, so install there too rather than in a venv.
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 COPY align.py server.py ./
 
 # Hugging Face model cache; mount a volume here so models survive restarts.
