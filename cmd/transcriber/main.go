@@ -24,7 +24,8 @@ import (
 
 func main() {
 	port := flag.Int("port", 8888, "HTTP listen port")
-	workers := flag.Int("workers", 2, "number of transcription worker goroutines")
+	workers := flag.Int("workers", 2, "concurrent jobs on local models (GPU-bound)")
+	remoteWorkers := flag.Int("remote-workers", 10, "concurrent jobs on remote (cloud API) models, independent of -workers")
 	callbackWorkers := flag.Int("callback-workers", 2, "number of webhook delivery goroutines")
 	defaultModel := flag.String("default-model", "stub", "model adapter ID to use when the request omits `model`")
 	defaultLanguage := flag.String("default-language", "", "ISO 639-1 language hint applied when the request omits `language` (empty or `auto` = let the model detect)")
@@ -73,6 +74,7 @@ func main() {
 
 	store := jobs.NewStore(*maxTerminalJobs)
 	queue := jobs.NewQueue()
+	remoteQueue := jobs.NewQueue()
 	notifier := callback.NewNotifier(*callbackWorkers, 256)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -80,16 +82,23 @@ func main() {
 
 	notifier.Start(ctx)
 
-	pool := worker.New(*workers, store, queue, registry, notifier, func(j jobs.Job) any {
-		return api.ToDTO(j)
-	}, worker.Config{
-		DefaultTimeout: *jobTimeout,
-		ScratchRoot:    *scratchDir,
-		KeepWorkDirs:   *keepWorkDirs,
-	})
+	toDTO := func(j jobs.Job) any { return api.ToDTO(j) }
+	poolCfg := func(name string) worker.Config {
+		return worker.Config{
+			Name:           name,
+			DefaultTimeout: *jobTimeout,
+			ScratchRoot:    *scratchDir,
+			KeepWorkDirs:   *keepWorkDirs,
+		}
+	}
+	// Local models compete for the GPU; cloud models only wait on a remote API,
+	// so they get their own, larger pool and queue.
+	pool := worker.New(*workers, store, queue, registry, notifier, toDTO, poolCfg("local"))
+	remotePool := worker.New(*remoteWorkers, store, remoteQueue, registry, notifier, toDTO, poolCfg("remote"))
 	pool.Start(ctx)
+	remotePool.Start(ctx)
 
-	srv := api.NewServer(store, queue, registry, defaultPrompts, normalizedDefaultLang)
+	srv := api.NewServer(store, queue, remoteQueue, registry, defaultPrompts, normalizedDefaultLang)
 	addr := fmt.Sprintf(":%d", *port)
 	httpSrv := &http.Server{
 		Addr:              addr,
@@ -110,6 +119,7 @@ func main() {
 			"commit", v.Commit,
 			"build_time", v.BuildTime,
 			"workers", *workers,
+			"remote_workers", *remoteWorkers,
 			"default_model", *defaultModel,
 			"default_language", normalizedDefaultLang,
 			"models", modelIDs,
@@ -130,8 +140,10 @@ func main() {
 	_ = httpSrv.Shutdown(shutdownCtx)
 
 	queue.Close()
+	remoteQueue.Close()
 	cancel()
 	pool.Wait()
+	remotePool.Wait()
 	notifier.Shutdown()
 	slog.Info("shutdown complete")
 }

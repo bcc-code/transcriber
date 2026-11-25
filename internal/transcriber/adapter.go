@@ -67,6 +67,7 @@ type Transcriber interface {
 type Registry struct {
 	adapters map[string]Transcriber
 	aliases  map[string]string // alternate ID -> canonical adapter ID
+	remote   map[string]bool   // canonical IDs of adapters that run on a remote service
 	def      string
 }
 
@@ -74,12 +75,28 @@ func NewRegistry(defaultID string) *Registry {
 	return &Registry{
 		adapters: map[string]Transcriber{},
 		aliases:  map[string]string{},
+		remote:   map[string]bool{},
 		def:      defaultID,
 	}
 }
 
 func (r *Registry) Register(t Transcriber) {
 	r.adapters[t.ID()] = t
+}
+
+// RegisterRemote registers an adapter whose work happens on a remote service
+// (a cloud API). Its jobs run in the remote worker pool, which is sized
+// independently of the local, GPU-bound pool.
+func (r *Registry) RegisterRemote(t Transcriber) {
+	r.Register(t)
+	r.remote[t.ID()] = true
+}
+
+// IsRemote reports whether id (or the adapter an alias points to) was
+// registered with RegisterRemote. Unknown IDs are not remote.
+func (r *Registry) IsRemote(id string) bool {
+	t, ok := r.Get(id)
+	return ok && r.remote[t.ID()]
 }
 
 // Alias makes `from` resolve to the same adapter as `to`. Aliases are not listed.

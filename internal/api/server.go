@@ -14,14 +14,15 @@ import (
 
 type Server struct {
 	store           *jobs.Store
-	queue           *jobs.Queue
+	queue           *jobs.Queue // local (GPU-bound) jobs
+	remoteQueue     *jobs.Queue // jobs for cloud adapters; nil sends everything to queue
 	registry        *transcriber.Registry
 	defaultPrompts  transcriber.DefaultPrompts
 	defaultLanguage string
 }
 
-func NewServer(store *jobs.Store, queue *jobs.Queue, registry *transcriber.Registry, defaultPrompts transcriber.DefaultPrompts, defaultLanguage string) *Server {
-	return &Server{store: store, queue: queue, registry: registry, defaultPrompts: defaultPrompts, defaultLanguage: defaultLanguage}
+func NewServer(store *jobs.Store, queue, remoteQueue *jobs.Queue, registry *transcriber.Registry, defaultPrompts transcriber.DefaultPrompts, defaultLanguage string) *Server {
+	return &Server{store: store, queue: queue, remoteQueue: remoteQueue, registry: registry, defaultPrompts: defaultPrompts, defaultLanguage: defaultLanguage}
 }
 
 // Routes mounts staticHandler at "/" when non-nil; API patterns take precedence.
@@ -117,8 +118,17 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ToDTO(stored))
 		return
 	}
-	s.queue.Push(stored.ID, stored.Priority, stored.CreatedAt)
+	s.queueFor(stored.Model).Push(stored.ID, stored.Priority, stored.CreatedAt)
 	writeJSON(w, http.StatusAccepted, ToDTO(stored))
+}
+
+// queueFor picks the queue for a model: cloud adapters run in their own pool so
+// they neither wait behind nor hold up local GPU jobs.
+func (s *Server) queueFor(model string) *jobs.Queue {
+	if s.remoteQueue != nil && s.registry.IsRemote(model) {
+		return s.remoteQueue
+	}
+	return s.queue
 }
 
 func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {

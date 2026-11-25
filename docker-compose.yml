@@ -32,6 +32,7 @@ services:
     command:
       - "-port=${PORT:-8888}"
       - "-workers=${WORKERS:-2}"
+      - "-remote-workers=${REMOTE_WORKERS:-10}"
       - "-callback-workers=${CALLBACK_WORKERS:-2}"
       - "-default-model=${DEFAULT_MODEL:-whisper-cpp-large-v3}"
       - "-default-language=${DEFAULT_LANGUAGE:-}"

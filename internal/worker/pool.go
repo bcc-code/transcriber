@@ -20,6 +20,9 @@ import (
 
 // Config holds the pool's tunables.
 type Config struct {
+	// Name labels the pool in logs, e.g. "local" or "remote".
+	Name string
+
 	// DefaultTimeout <= 0 disables the wall-clock cap; a job's own Timeout
 	// takes precedence when non-zero.
 	DefaultTimeout time.Duration
@@ -81,7 +84,7 @@ func (p *Pool) Wait() { p.wg.Wait() }
 
 func (p *Pool) worker(ctx context.Context, n int) {
 	defer p.wg.Done()
-	log := slog.With("worker", n)
+	log := slog.With("pool", p.cfg.Name, "worker", n)
 	for {
 		id, ok := p.queue.Pop(ctx)
 		if !ok {

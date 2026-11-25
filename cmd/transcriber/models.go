@@ -110,7 +110,7 @@ func registerElevenLabs(r *transcriber.Registry) {
 		{"elevenlabs-scribe-v1", "scribe_v1", "ElevenLabs Scribe v1"},
 	}
 	for _, m := range models {
-		r.Register(elevenlabs.New(elevenlabs.Config{
+		r.RegisterRemote(elevenlabs.New(elevenlabs.Config{
 			ID:          m.id,
 			DisplayName: m.name,
 			APIKey:      key,
@@ -158,7 +158,7 @@ func registerOpenRouter(r *transcriber.Registry) {
 		if name == "" {
 			name = m.ID
 		}
-		r.Register(chunked.New(
+		r.RegisterRemote(chunked.New(
 			openrouter.New(openrouter.Config{
 				ID:          id,
 				DisplayName: "OpenRouter " + name,
