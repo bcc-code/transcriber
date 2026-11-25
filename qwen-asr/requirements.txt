@@ -1,0 +1,3 @@
+# torch comes from the pytorch/pytorch base image. qwen-asr pins its own
+# transformers version (separate image from the aligner, so no conflict).
+qwen-asr==0.0.6

@@ -13,6 +13,7 @@ import (
 	"transcriber/internal/transcriber/chunked"
 	"transcriber/internal/transcriber/elevenlabs"
 	"transcriber/internal/transcriber/openrouter"
+	"transcriber/internal/transcriber/qwenasr"
 	"transcriber/internal/transcriber/stub"
 	"transcriber/internal/transcriber/whispercpp"
 )
@@ -77,6 +78,26 @@ func buildRegistry(defaultID string, whisperNoGPU bool) *transcriber.Registry {
 		chunked.Config{},
 	)))
 
+	r.Register(local(chunked.New(
+		whispercpp.New(whispercpp.Config{
+			ID:          "nb-whisper-medium",
+			DisplayName: "NB-Whisper medium (Norwegian)",
+			Binary:      whisperBin,
+			ModelFile:   os.Getenv("NB_WHISPER_MEDIUM_MODEL"),
+			ResolveModel: func(ctx context.Context) (string, error) {
+				return cache.Get(ctx, "NbAiLab/nb-whisper-medium", "ggml-model.bin")
+			},
+			Threads:         8,
+			DTWPreset:       "medium",
+			VADModelFile:    vadModelFile,
+			ResolveVADModel: resolveVAD,
+			NoGPU:           whisperNoGPU,
+		}),
+		chunked.Config{},
+	)))
+
+	registerQwenASR(r, local)
+
 	// Sub-large sizes upgrade to large — matches the old runner's coercion behavior.
 	r.Alias("openai/whisper-large-v3", "whisper-cpp-large-v3")
 	r.Alias("openai/whisper-large-v2", "whisper-cpp-large-v3")
@@ -85,7 +106,7 @@ func buildRegistry(defaultID string, whisperNoGPU bool) *transcriber.Registry {
 	r.Alias("openai/whisper-small", "whisper-cpp-large-v3")
 	r.Alias("openai/whisper-tiny", "whisper-cpp-large-v3")
 	r.Alias("NbAiLab/nb-whisper-large", "nb-whisper-large")
-	r.Alias("NbAiLab/nb-whisper-medium", "nb-whisper-large")
+	r.Alias("NbAiLab/nb-whisper-medium", "nb-whisper-medium")
 	r.Alias("NbAiLab/nb-whisper-small", "nb-whisper-large")
 	r.Alias("NbAiLab/nb-whisper-tiny", "nb-whisper-large")
 
@@ -93,6 +114,30 @@ func buildRegistry(defaultID string, whisperNoGPU bool) *transcriber.Registry {
 	registerOpenRouter(r)
 
 	return r
+}
+
+// registerQwenASR adds NbAiLab's Nordlyd Qwen3-ASR model, served by the
+// qwen-asr service (qwen-asr/). It runs on the local GPU, so it goes in the
+// local pool, and its words are re-timed by the aligner like whisper's (the
+// model itself gives no timestamps). Skipped without QWEN_ASR_URL.
+func registerQwenASR(r *transcriber.Registry, local func(transcriber.Transcriber) transcriber.Transcriber) {
+	url := os.Getenv("QWEN_ASR_URL")
+	if url == "" {
+		slog.Info("qwen-asr backend disabled: QWEN_ASR_URL not set")
+		return
+	}
+	const id = "nordlyd-asr-qwen-0.6b"
+	r.Register(local(chunked.New(
+		qwenasr.New(qwenasr.Config{
+			ID:              id,
+			DisplayName:     "Nordlyd ASR Qwen3 0.6B (Norwegian, Nov 26 preview)",
+			URL:             url,
+			DefaultLanguage: "no",
+		}),
+		chunked.Config{},
+	)))
+	r.Alias("NbAiLab/nordlyd-asr-qwen06B-nov26preview", id)
+	slog.Info("qwen-asr backend enabled", "url", url, "model", id)
 }
 
 // registerElevenLabs adds one adapter per Scribe model so clients choose the

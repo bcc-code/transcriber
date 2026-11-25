@@ -52,6 +52,9 @@ services:
       # below). Set ALIGNER_URL= (empty) in .env to turn it off. If the
       # aligner is down, jobs still complete with whisper's own timestamps.
       ALIGNER_URL: ${ALIGNER_URL-http://aligner:8000}
+      # Nordlyd Qwen3-ASR model (qwen-asr service below). Set QWEN_ASR_URL=
+      # (empty) in .env to unregister it.
+      QWEN_ASR_URL: ${QWEN_ASR_URL-http://qwen-asr:8000}
 
     volumes:
       # ggml model cache — first job downloads ~3 GB, this keeps it.
@@ -117,6 +120,38 @@ services:
               count: all
               capabilities: [gpu]
 
+  # Qwen3-ASR service (qwen-asr/): serves the Nordlyd model
+  # (NbAiLab/nordlyd-asr-qwen06B-nov26preview). Same exposure and mount rules
+  # as the aligner. The model is gated on Hugging Face: HF_TOKEN must belong to
+  # an account that was granted access, or loading fails.
+  qwen-asr:
+    image: ${QWEN_ASR_IMAGE:-ghcr.io/bcc-code/transcriber-qwen-asr:latest}
+    build:
+      context: ./qwen-asr
+    restart: unless-stopped
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      QWEN_ASR_MODEL: ${QWEN_ASR_MODEL:-NbAiLab/nordlyd-asr-qwen06B-nov26preview}
+    volumes:
+      - qwen-asr-models:/models
+      - ${STORAGE_PATH:-/mnt/storage}:${STORAGE_PATH:-/mnt/storage}:ro
+      - ${SOURCE_PATH:-/mnt/isilon}:${SOURCE_PATH:-/mnt/isilon}:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      # Model download (~1.6 GB) on first start.
+      start_period: 600s
+      retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
 volumes:
   models:
   aligner-models:
+  qwen-asr-models:

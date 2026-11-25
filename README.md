@@ -31,7 +31,8 @@ compile (the `//go:embed` directive needs at least one file) — run
 `make frontend` once after cloning, then `go run ./cmd/transcriber` works
 on its own for API-only iteration.
 
-The real adapters (`whisper-cpp-large-v3`, `nb-whisper-large`) require
+The real adapters (`whisper-cpp-large-v3`, `nb-whisper-large`,
+`nb-whisper-medium`) require
 **whisper-cli** (whisper.cpp), **ffmpeg**, and **ffprobe** on `$PATH`:
 the chunked wrapper uses ffprobe to read the input duration and ffmpeg
 to extract each chunk to a 16kHz mono wav. Model files are downloaded
@@ -168,7 +169,7 @@ timing. Audio for these jobs leaves the host.
 ### Forced alignment
 
 With `ALIGNER_URL` set, the local whisper models (`whisper-cpp-large-v3`,
-`nb-whisper-large`) send their result to the aligner service (`aligner/`)
+`nb-whisper-large`, `nb-whisper-medium`, and the Nordlyd Qwen model) send their result to the aligner service (`aligner/`)
 after transcription. It keeps whisper's text and moves each word's timestamps
 to where a wav2vec2 CTC model finds it in the audio, which fixes words whisper
 placed at the wrong side of a pause. Segment bounds follow their words.
@@ -185,6 +186,23 @@ is logged. Cloud backends are not aligned.
 The aligner reads the job's audio path itself, so it needs the same mounts as
 the transcriber. It has no authentication; docker-compose keeps it on the
 internal network.
+
+### Nordlyd Qwen3-ASR
+
+With `QWEN_ASR_URL` set, `nordlyd-asr-qwen-0.6b` (alias
+`NbAiLab/nordlyd-asr-qwen06B-nov26preview`) is registered as a local model.
+It is served by the `qwen-asr/` service, which runs the model with the
+`qwen-asr` package on the GPU. The model is gated on Hugging Face, so the
+service needs an `HF_TOKEN` from an account that was granted access.
+
+Qwen3-ASR returns text without timestamps. The service splits the audio at
+quiet points into pieces of 20 s or less and returns each piece's text with
+its span. The adapter spreads the words over the span by length, and the
+aligner then places them, so word and subtitle timing depends on the aligner.
+Without it, word times are estimates within each piece. The request `prompt`
+is passed as the model's context, as a keyterm list. Norwegian cannot be
+forced in `qwen-asr`, so for `no`/`nb`/`nn` the model detects the language
+itself; codes it does support, such as `en`, are forced.
 
 ### Additive endpoints
 

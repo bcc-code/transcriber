@@ -250,7 +250,7 @@ Both whisper.cpp adapters resolve the FP16 large-v3 weights (~3 GB
 each) — the reference quality. On the RTX 3090 (24 GB VRAM) there's no
 reason to trade accuracy for the Q5_0 variant; CUDA inference is
 compute-bound here, not memory-bound. Override `WHISPER_CPP_MODEL` /
-`NB_WHISPER_MODEL` / `WHISPER_VAD_MODEL` on the service to pin a model to
+`NB_WHISPER_MODEL` / `NB_WHISPER_MEDIUM_MODEL` / `WHISPER_VAD_MODEL` on the service to pin a model to
 a specific file on disk instead of letting the HF cache resolve it.
 
 ## Pre-seeding models

@@ -21,6 +21,7 @@ var keytermPrefixes = []string{
 	"openrouter/deepgram/",
 	"openrouter/elevenlabs/",
 	"openrouter/assemblyai/",
+	"nordlyd-", // Qwen3-ASR context biases toward listed terms
 }
 
 // PromptStyleFor returns the prompt style for a canonical adapter ID.

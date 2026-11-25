@@ -12,6 +12,7 @@ func TestDefaultPromptsFor(t *testing.T) {
 		"openrouter/deepgram/nova-3":              "keyterms",
 		"openrouter/elevenlabs/scribe-v2":         "keyterms",
 		"openrouter/assemblyai/universal-3-6-pro": "keyterms",
+		"nordlyd-asr-qwen-0.6b":                   "keyterms",
 	}
 	for id, want := range cases {
 		if got := d.For(id); got != want {
