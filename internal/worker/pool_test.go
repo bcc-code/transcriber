@@ -198,3 +198,41 @@ func runJobAndWait(t *testing.T, defaultTimeout, jobTimeout time.Duration) jobs.
 func isTerminal(s string) bool {
 	return s == jobs.StatusCompleted || s == jobs.StatusFailed || s == jobs.StatusCanceled
 }
+
+// A redeploy cancels the pools' context. That must not finish the job as
+// CANCELED: it stays RUNNING so the next process's Store.Recover requeues it.
+func TestPool_ShutdownLeavesJobForRecovery(t *testing.T) {
+	store := jobs.NewStore(0)
+	queue := jobs.NewQueue()
+	t.Cleanup(queue.Close)
+
+	registry := transcriber.NewRegistry("stub")
+	registry.Register(stub.New("stub", "Stub"))
+
+	ctx, shutdown := context.WithCancel(t.Context())
+	pool := New(1, store, queue, registry, nil, func(j jobs.Job) any { return j }, Config{})
+	pool.Start(ctx)
+
+	now := time.Now()
+	job := jobs.Job{ID: "interrupted", Path: "/dev/null", OutputPath: t.TempDir(), Model: "stub", Status: jobs.StatusPending, CreatedAt: now}
+	store.Create(job)
+	queue.Push(job.ID, 1, now)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if j, _ := store.Get(job.ID); j.Status == jobs.StatusRunning {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("job never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	shutdown()
+	pool.Wait()
+
+	got, _ := store.Get(job.ID)
+	if got.Status != jobs.StatusRunning || !got.EndedAt.IsZero() {
+		t.Fatalf("after shutdown: status=%q ended=%v, want RUNNING and not ended", got.Status, got.EndedAt)
+	}
+}

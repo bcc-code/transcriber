@@ -236,6 +236,7 @@ inspecting a bad transcription.
 | Mount                                          | Purpose                                                                                                                                              |
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `models:/var/cache/transcriber`                | ggml whisper.cpp models. Survives restarts — first job downloads ~3 GB.                                                                               |
+| `state:/var/lib/transcriber`                   | Job state (`state.db`, SQLite). Keeps the queue and job history across redeploys; finished jobs are pruned after `RETENTION` (default 7 days).      |
 | `aligner-models:/models` _(aligner service)_    | wav2vec2 alignment models. The Norwegian one (~4 GB) downloads on first start (`ALIGN_PRELOAD=no`); others on first use.                              |
 | `${STORAGE_PATH}:${STORAGE_PATH}`              | Audio inputs (`path`) and transcript outputs (`output_path`). Mounted at the same path inside and out, because request paths resolve in the container. |
 | `${SOURCE_PATH}:${SOURCE_PATH}:ro`             | Read-only source audio (default `/mnt/isilon`). Same-path rule; must exist on the host.                                                              |
@@ -288,11 +289,12 @@ line `transcriber api listening` lists the registered model IDs — check it
 to confirm a backend is enabled.
 
 The API has a 10 s graceful shutdown — in-flight HTTP requests finish,
-but workers receive a cancel and any running transcription jobs are
-killed. **The job store is in-memory**, so a restart also discards the
-queue and all job history; the caller's next poll returns 404. Drain
-first (`GET /transcription/jobs`, `DELETE /transcription/job/{id}`) or
-redeploy when idle.
+and running transcription jobs are killed. Job state lives in SQLite on the
+`state` volume, so a redeploy keeps the queue and job history: on startup,
+queued jobs are queued again and jobs that were running restart from the
+beginning (their status shows `RUNNING` until the new process picks them up).
+The cost of a redeploy is therefore the progress of the running jobs. Webhook
+callbacks not yet delivered at shutdown are lost.
 
 ## Logs
 
@@ -303,9 +305,6 @@ JSON by default (`LOG_FORMAT` in `.env`).
 
 Tracked in `IMPROVEMENTS.md`; these are the ones that affect operations:
 
-- **In-memory job store.** Restart or crash loses the queue and history.
-  `MAX_TERMINAL_JOBS` (default 200 here) also evicts completed jobs, so a
-  large enough burst can evict a result before the caller reads it.
 - **Output files are root-owned.** The container runs as root, so
   transcripts land on `STORAGE_PATH` as `root:root`.
 - **No authentication.** Anything that can reach the port can submit jobs
@@ -326,7 +325,7 @@ Tracked in `IMPROVEMENTS.md`; these are the ones that affect operations:
 | Very slow start per job, or a CUDA init failure                        | `CUDA_ARCHS` doesn't match the GPU, so the kernels PTX-JIT at startup. Rebuild the base with the right SM version (86 = RTX 3090).                                 |
 | A job fails with a CUDA OOM                                            | Too many concurrent jobs for the VRAM. Each worker holds a ~3 GB FP16 model plus buffers; lower `WORKERS`.                                                          |
 | `chunks/` or `whispercpp_out.json` appearing in `output_path`           | Scratch-directory handling regressed — adapters should only write under the per-job work dir. See "Scratch space".                                                 |
-| Caller gets 404 for a job it just submitted                            | Either the process restarted (the job store is in-memory) or the job was evicted — raise `MAX_TERMINAL_JOBS`.                                                       |
+| Caller gets 404 for a job                                              | The job ended more than `RETENTION` ago and was pruned, or the `state` volume was removed.                                                                          |
 | Base image build dies mid-compile with no compiler error               | OOM-killed. `BUILD_JOBS` is derived from available memory, but override it lower: `--build-arg BUILD_JOBS=2`.                                                       |
 | `undefined reference to 'cuGetErrorString'` building the base          | The CUDA driver stub is missing from the link line — see the `CUDA_STUBS` args in `Dockerfile.whisper`.                                                             |
 

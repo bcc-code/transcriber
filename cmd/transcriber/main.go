@@ -31,7 +31,8 @@ func main() {
 	defaultLanguage := flag.String("default-language", "", "ISO 639-1 language hint applied when the request omits `language` (empty or `auto` = let the model detect)")
 	defaultPromptFile := flag.String("default-prompt-file", "prompts/whisper.txt", "free-text prompt used when the request omits one, for Whisper-style models (missing file = no default prompt)")
 	defaultKeytermsFile := flag.String("default-keyterms-file", "prompts/keyterms.txt", "comma/newline separated keyterms used when the request omits a prompt, for keyterm models such as ElevenLabs Scribe and Deepgram (missing file = fall back to -default-prompt-file)")
-	maxTerminalJobs := flag.Int("max-terminal-jobs", 20, "how many finished jobs (completed/failed/canceled) to retain in memory; <= 0 disables the cap")
+	stateDB := flag.String("state-db", "transcriber.db", "SQLite file holding job state, so jobs survive a restart; empty keeps state in memory only")
+	retention := flag.Duration("retention", 7*24*time.Hour, "how long finished jobs (completed/failed/canceled) are kept after they end; <= 0 keeps them forever")
 	jobTimeout := flag.Duration("job-timeout", 30*time.Minute, "default wall-clock timeout per job; per-request timeout_seconds overrides this; <= 0 disables")
 	logFormat := flag.String("log-format", "text", "log handler: text (human-readable, dev) or json (structured, prod)")
 	scratchDir := flag.String("scratch-dir", "", "directory for per-job scratch space (extracted audio chunks, raw model output); empty uses the OS temp dir. Keep this on local disk, not network storage")
@@ -72,13 +73,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	store := jobs.NewStore(*maxTerminalJobs)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := jobs.NewStore(*retention)
+	if *stateDB != "" {
+		var err error
+		store, err = jobs.Open(ctx, *stateDB, *retention)
+		if err != nil {
+			slog.Error("open job store", "path", *stateDB, "err", err)
+			os.Exit(1)
+		}
+	}
+	defer store.Close()
+	go store.RunPruner(ctx, time.Hour)
+
 	queue := jobs.NewQueue()
 	remoteQueue := jobs.NewQueue()
 	notifier := callback.NewNotifier(*callbackWorkers, 256)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	notifier.Start(ctx)
 
@@ -95,6 +107,17 @@ func main() {
 	// so they get their own, larger pool and queue.
 	pool := worker.New(*workers, store, queue, registry, notifier, toDTO, poolCfg("local"))
 	remotePool := worker.New(*remoteWorkers, store, remoteQueue, registry, notifier, toDTO, poolCfg("remote"))
+	// Jobs a previous process accepted but didn't finish. Pushed before the
+	// pools start so they keep their place ahead of new submissions of equal
+	// priority (the queue is FIFO by CreatedAt within a priority).
+	for _, j := range store.Recover() {
+		q := queue
+		if registry.IsRemote(j.Model) {
+			q = remoteQueue
+		}
+		q.Push(j.ID, j.Priority, j.CreatedAt)
+		slog.Info("requeued job from previous run", "id", j.ID, "model", j.Model)
+	}
 	pool.Start(ctx)
 	remotePool.Start(ctx)
 

@@ -161,6 +161,13 @@ func (p *Pool) runJob(parent context.Context, id string, log *slog.Logger) {
 
 	res, err := adapter.Transcribe(ctx, req, onProgress)
 	if err != nil {
+		if parent.Err() != nil {
+			// The process is shutting down; the job itself wasn't canceled.
+			// Leave it RUNNING with no callback: on the next start the store's
+			// Recover requeues it and it runs again from the beginning.
+			log.Info("job interrupted by shutdown; will restart", "id", id)
+			return
+		}
 		switch {
 		case errors.Is(ctx.Err(), context.DeadlineExceeded):
 			p.markFailed(id, errors.New("timeout"))

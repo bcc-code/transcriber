@@ -42,7 +42,8 @@ services:
       - "-default-model=${DEFAULT_MODEL:-whisper-cpp-large-v3}"
       - "-default-language=${DEFAULT_LANGUAGE:-}"
       - "-job-timeout=${JOB_TIMEOUT:-30m}"
-      - "-max-terminal-jobs=${MAX_TERMINAL_JOBS:-200}"
+      - "-state-db=/var/lib/transcriber/state.db"
+      - "-retention=${RETENTION:-168h}"
       - "-log-format=${LOG_FORMAT:-json}"
 
     # Optional ElevenLabs Scribe backend; registered only when the key is set.
@@ -64,6 +65,9 @@ services:
     volumes:
       # ggml model cache — first job downloads ~3 GB, this keeps it.
       - models:/var/cache/transcriber
+      # Job state (SQLite). Survives redeploys, so queued jobs and finished
+      # results outlive the container; jobs that were mid-run start over.
+      - state:/var/lib/transcriber
       # Audio in / transcripts out. Job requests carry absolute paths that are
       # resolved *inside* the container, so host and container paths must match.
       # STORAGE_PATH must already exist on the host: Docker otherwise creates
@@ -161,3 +165,4 @@ volumes:
   models:
   aligner-models:
   qwen-asr-models:
+  state:

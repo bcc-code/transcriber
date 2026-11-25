@@ -1,0 +1,11 @@
+# Generates internal/jobs/jobsdb from the goose migrations and queries.sql.
+# Regenerate with `make sqlc` after changing either.
+version: "2"
+sql:
+  - engine: sqlite
+    schema: internal/jobs/migrations
+    queries: internal/jobs/queries.sql
+    gen:
+      go:
+        package: jobsdb
+        out: internal/jobs/jobsdb

@@ -14,7 +14,7 @@ real failure. They're documented for context if a future caller appears.
 - **Callback firing on failure.** Old fired `doCallback` only on `COMPLETED`. New fires for `FAILED` and `CANCELED` as well. The caller doesn't register a callback (it polls), so this is invisible.
 - **`output_path` is required.** Old accepted empty; new returns `400`. The caller always sets it.
 - **`format` field honoring.** Old python ignored `format` entirely and always wrote all five files. New honors `format` strictly. The caller always sends `format: "all"`, which writes all five (now including `words.srt`).
-- **`list` cap.** Old kept only the last 10 processed jobs in memory. New caps jobs in a terminal status (completed/failed/canceled) at `-max-terminal-jobs` (default 20); active jobs are never evicted. Differs in size and in which jobs are protected from eviction.
+- **`list` contents.** Old kept only the last 10 processed jobs in memory. New persists jobs in SQLite and keeps terminal ones (completed/failed/canceled) for `-retention` (default 7 days) after they end; active jobs are never pruned. The list is larger, and survives restarts.
 - **Status set additive.** New emits `CANCELED` (in addition to the old `QUEUED|RUNNING|COMPLETED|FAILED`); the caller's status switch falls through unknowns and keeps polling.
 
 ## Missing endpoints

@@ -33,3 +33,6 @@ prompt.txt
 
 # Compiled binary from `make build`
 /transcriber
+
+# Local job state (-state-db)
+/transcriber.db*

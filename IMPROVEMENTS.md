@@ -4,18 +4,6 @@ Working notes for hardening this into a production API-first service that
 backs a VOD pipeline. Ordered roughly by ROI for that use case; the
 chunking work for long-form audio is already in `internal/transcriber/chunked`.
 
-## Persistent job store
-
-`internal/jobs.Store` is in-memory: a server restart loses the queue and all
-history. For an API behind a pipeline this is unacceptable — retries can't
-deduplicate, the caller can't query status across restarts, and a crash
-mid-job silently drops work.
-
-Approach: drop in SQLite via `modernc.org/sqlite` (pure Go, no CGO). The
-existing `Store` interface fits a SQL backing with `jobs` + `job_events`
-tables. Restore in-flight jobs on boot (mark `RUNNING`-but-unowned ones as
-`PENDING` and requeue). Half-day swap.
-
 ## Network access control
 
 Currently anything reachable on the port can submit jobs. With a single

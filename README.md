@@ -61,7 +61,8 @@ Go code. Server settings come from flags; per-machine paths from env vars.
 | `-default-prompt-file` | `prompts/whisper.txt` | free-text prompt used when the request omits one, for Whisper-style models; missing file = no default. A non-empty `prompt` in the request fully overrides it |
 | `-default-keyterms-file` | `prompts/keyterms.txt` | keyterm list used instead of the free-text prompt for keyterm models (`elevenlabs-*`, `openrouter/deepgram/*`, `openrouter/elevenlabs/*`, `openrouter/assemblyai/*`); missing file = those models get the free-text prompt |
 | `-job-timeout`         | `30m`        | wall-clock cap per job; on expiry the worker cancels the subprocess and marks the job `FAILED` with `error: "timeout"`. Per-request `timeout_seconds` overrides this. `<= 0` disables |
-| `-max-terminal-jobs`   | `20`         | how many finished jobs (completed/failed/canceled) to retain in memory; `<= 0` disables the cap                                                                                       |
+| `-state-db`            | `transcriber.db` | SQLite file holding job state (migrated on startup). Queued jobs and finished results survive a restart; jobs that were running start over. Empty = in-memory only           |
+| `-retention`           | `168h`       | how long finished jobs (completed/failed/canceled) are kept after they end; pruned hourly. Active jobs are never pruned. `<= 0` keeps them forever                                    |
 | `-log-format`          | `text`       | `text` for human-readable output (dev), `json` for structured logs (prod). The Dockerfile sets `json`                                                                                 |
 | `-scratch-dir`         | _(OS temp)_  | where per-job scratch dirs are created for adapter intermediates (extracted chunk wavs, raw model output). Keep on local disk — chunking writes ~115 MB per hour of audio            |
 | `-keep-work-dirs`      | `false`      | retain per-job scratch dirs after completion, for inspecting a bad transcription. They are large; off by default                                                                     |
@@ -104,8 +105,7 @@ json+srt+vtt+txt; or pass a comma-separated subset like `"json,srt"`.
 Send an `Idempotency-Key` header to dedupe retries: a repeated POST with the
 same key returns the original job (`200 OK`) instead of creating a new one
 (`202 Accepted`). The mapping lives as long as the job is in the store, so
-once a job has been evicted (see `-max-terminal-jobs`) the same key starts
-fresh.
+once a job has been pruned (see `-retention`) the same key starts fresh.
 
 ```sh
 # Submit a job, then poll until it completes.

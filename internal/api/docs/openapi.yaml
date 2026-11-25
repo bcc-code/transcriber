@@ -81,7 +81,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/TranscribeJob" }
         "404":
-          description: No job with that ID (or it was evicted from the in-memory store).
+          description: No job with that ID (or it ended longer ago than `-retention` and was pruned).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -107,8 +107,8 @@ paths:
       summary: List jobs
       description: |
         Returns all jobs the server currently knows about. Terminal jobs are
-        capped at `-max-terminal-jobs` (default 20, oldest evicted first);
-        active jobs are never evicted.
+        kept for `-retention` (default 7 days) after they end; active jobs
+        are never pruned. Jobs persist across server restarts.
       responses:
         "200":
           description: Job list.
