@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -114,13 +115,6 @@ func (a *Adapter) Transcribe(ctx context.Context, req transcriber.Request, onPro
 	if req.Prompt != "" {
 		args = append(args, "--prompt", req.Prompt)
 	}
-	if a.cfg.DTWPreset != "" {
-		// whisper.cpp >= 1.8 enables flash attention by default, and DTW is
-		// incompatible with it: whisper-cli logs "dtw_token_timestamps is not
-		// supported with flash_attn - disabling" and silently drops DTW, so
-		// word timestamps drift. -nfa keeps DTW on at some speed cost.
-		args = append(args, "-nfa", "-dtw", a.cfg.DTWPreset)
-	}
 	vadPath := a.cfg.VADModelFile
 	if vadPath == "" && a.cfg.ResolveVADModel != nil {
 		p, err := a.cfg.ResolveVADModel(ctx)
@@ -134,18 +128,67 @@ func (a *Adapter) Transcribe(ctx context.Context, req transcriber.Request, onPro
 	}
 
 	start := time.Now()
+	var dtwArgs []string
+	if a.cfg.DTWPreset != "" {
+		// whisper.cpp >= 1.8 enables flash attention by default, and DTW is
+		// incompatible with it: whisper-cli logs "dtw_token_timestamps is not
+		// supported with flash_attn - disabling" and silently drops DTW, so
+		// word timestamps drift. -nfa keeps DTW on at some speed cost.
+		dtwArgs = []string{"-nfa", "-dtw", a.cfg.DTWPreset}
+	}
+	data, vad, err := a.run(ctx, append(args, dtwArgs...), outPrefix, onProgress)
+	if err != nil && dtwArgs != nil && isDTWShortWindowAbort(err) {
+		// whisper.cpp bug: see isDTWShortWindowAbort. The run is lost, so do
+		// it again without DTW; word timing falls back to whisper's own token
+		// timestamps (and is re-timed by the aligner when that is enabled).
+		slog.Warn("whisper.cpp DTW aborted on a short final window; retrying without DTW",
+			"model", a.cfg.ID, "input", req.InputPath)
+		data, vad, err = a.run(ctx, args, outPrefix, onProgress)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tr, err := parseJSON(data, req.Language, vad)
+	if err != nil {
+		return nil, err
+	}
+	return &transcriber.Result{
+		Transcription: tr,
+		ModelUsed:     a.cfg.ID,
+		Duration:      time.Since(start),
+	}, nil
+}
+
+// dtwShortWindowAssert is the assertion whisper.cpp (checked in v1.8.6) hits
+// when DTW runs on a decode window shorter than 16 mel frames (160 ms). Whisper
+// decodes any trailing window of 10 frames or more, and DTW's median filter
+// (width 7) needs more than 7 audio tokens = n_frames/2. With VAD the input is
+// the concatenated speech, so this fires whenever the total speech comes to a
+// multiple of 30 s plus 100–150 ms. whisper-cli then dies with SIGABRT.
+const dtwShortWindowAssert = "filter_width < a->ne[2]"
+
+func isDTWShortWindowAbort(err error) bool {
+	return err != nil && strings.Contains(err.Error(), dtwShortWindowAssert)
+}
+
+// run executes whisper-cli with args and returns the JSON it wrote to
+// outPrefix.json and the VAD time mapping it logged.
+func (a *Adapter) run(ctx context.Context, args []string, outPrefix string, onProgress transcriber.ProgressFunc) ([]byte, vadMap, error) {
+	// A retry must not read the previous attempt's output.
+	_ = os.Remove(outPrefix + ".json")
+
 	cmd := exec.CommandContext(ctx, a.cfg.Binary, args...)
 	procutil.KillGroupOnCancel(cmd)
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("whispercpp start: %w", err)
+		return nil, nil, fmt.Errorf("whispercpp start: %w", err)
 	}
 
 	capture := captureStderr(stderr, onProgress)
@@ -155,12 +198,12 @@ func (a *Adapter) Transcribe(ctx context.Context, req transcriber.Request, onPro
 	tail := capture.wait()
 	if waitErr != nil {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		}
 		if tail != "" {
-			return nil, fmt.Errorf("whispercpp exit: %w: %s", waitErr, tail)
+			return nil, nil, fmt.Errorf("whispercpp exit: %w: %s", waitErr, tail)
 		}
-		return nil, fmt.Errorf("whispercpp exit: %w", waitErr)
+		return nil, nil, fmt.Errorf("whispercpp exit: %w", waitErr)
 	}
 
 	data, err := os.ReadFile(outPrefix + ".json")
@@ -169,19 +212,11 @@ func (a *Adapter) Transcribe(ctx context.Context, req transcriber.Request, onPro
 		// prints help to stderr). Surface the stderr tail so the real cause
 		// isn't hidden behind a generic "no such file" from os.ReadFile.
 		if tail != "" {
-			return nil, fmt.Errorf("whispercpp output: %w: %s", err, tail)
+			return nil, nil, fmt.Errorf("whispercpp output: %w: %s", err, tail)
 		}
-		return nil, fmt.Errorf("whispercpp output: %w", err)
+		return nil, nil, fmt.Errorf("whispercpp output: %w", err)
 	}
-	tr, err := parseJSON(data, req.Language, capture.vad)
-	if err != nil {
-		return nil, err
-	}
-	return &transcriber.Result{
-		Transcription: tr,
-		ModelUsed:     a.cfg.ID,
-		Duration:      time.Since(start),
-	}, nil
+	return data, capture.vad, nil
 }
 
 // stderrCapture dispatches progress lines and buffers the tail for the exit error.
