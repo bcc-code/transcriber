@@ -119,11 +119,22 @@ func buildRegistry(defaultID string, whisperNoGPU bool) *transcriber.Registry {
 // registerQwenASR adds NbAiLab's Nordlyd Qwen3-ASR model, served by the
 // qwen-asr service (qwen-asr/). It runs on the local GPU, so it goes in the
 // local pool, and its words are re-timed by the aligner like whisper's (the
-// model itself gives no timestamps). Skipped without QWEN_ASR_URL.
+// model itself gives no timestamps). Skipped without QWEN_ASR_URL, and when
+// the service reports itself disabled (no HF_TOKEN, or the model failed to
+// load) or can't be reached at boot.
 func registerQwenASR(r *transcriber.Registry, local func(transcriber.Transcriber) transcriber.Transcriber) {
 	url := os.Getenv("QWEN_ASR_URL")
 	if url == "" {
 		slog.Info("qwen-asr backend disabled: QWEN_ASR_URL not set")
+		return
+	}
+	st, err := probeQwenASR(url)
+	if err != nil {
+		slog.Warn("qwen-asr backend disabled: service unreachable", "url", url, "err", err)
+		return
+	}
+	if !st.Enabled {
+		slog.Info("qwen-asr backend disabled by the service", "url", url, "reason", st.DisabledReason)
 		return
 	}
 	const id = "nordlyd-asr-qwen-0.6b"
@@ -138,6 +149,26 @@ func registerQwenASR(r *transcriber.Registry, local func(transcriber.Transcriber
 	)))
 	r.Alias("NbAiLab/nordlyd-asr-qwen06B-nov26preview", id)
 	slog.Info("qwen-asr backend enabled", "url", url, "model", id)
+}
+
+// probeQwenASR retries for a while: in compose the service may still be
+// starting (it answers /healthz before its model has loaded).
+func probeQwenASR(url string) (*qwenasr.Status, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	for {
+		reqCtx, reqCancel := context.WithTimeout(ctx, 5*time.Second)
+		st, err := qwenasr.Probe(reqCtx, nil, url)
+		reqCancel()
+		if err == nil {
+			return st, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 // registerElevenLabs adds one adapter per Scribe model so clients choose the

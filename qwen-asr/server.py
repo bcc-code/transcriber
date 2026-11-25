@@ -62,14 +62,24 @@ NAME_TO_CODE = {v.lower(): k for k, v in CODE_TO_NAME.items()} | {
 log = logging.getLogger("qwen-asr")
 
 
+class Disabled(Exception):
+    """The model is unavailable (no token, or it failed to load)."""
+
+
 class Service:
     def __init__(self):
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.model: Qwen3ASRModel | None = None
+        # The Nordlyd model is gated, so without a token there is nothing to
+        # load. The service still runs and reports itself disabled, and the
+        # transcriber leaves the model unregistered.
+        self.disabled_reason = "" if os.environ.get("HF_TOKEN") else "HF_TOKEN not set"
         # One GPU, one generate call at a time; audio decoding runs in parallel.
         self.lock = threading.Lock()
 
     def load(self) -> Qwen3ASRModel:
+        if self.disabled_reason:
+            raise Disabled(self.disabled_reason)
         if self.model is None:
             log.info("loading %s on %s", MODEL_NAME, self.device)
             self.model = Qwen3ASRModel.from_pretrained(
@@ -81,7 +91,22 @@ class Service:
             )
         return self.model
 
+    def preload(self):
+        """Load in the background so /healthz answers during the download. A
+        failed load (e.g. a token without access) disables the service
+        instead of crashing it."""
+        try:
+            with self.lock:
+                self.load()
+        except Disabled:
+            pass
+        except Exception as e:  # noqa: BLE001
+            log.exception("loading %s failed; disabled", MODEL_NAME)
+            self.disabled_reason = f"loading {MODEL_NAME} failed: {e}"
+
     def transcribe(self, req: dict) -> tuple[int, dict]:
+        if self.disabled_reason:
+            raise Disabled(self.disabled_reason)
         code = (req.get("language") or "").lower()
         force = CODE_TO_NAME.get(code)
         if force is not None and force not in SUPPORTED_LANGUAGES:
@@ -159,6 +184,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/healthz":
             self._send(200, {"status": "ok", "device": SERVICE.device, "model": MODEL_NAME,
+                             "enabled": not SERVICE.disabled_reason,
+                             "disabled_reason": SERVICE.disabled_reason,
                              "loaded": SERVICE.model is not None})
         else:
             self._send(404, {"error": "not found"})
@@ -172,6 +199,8 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             req = json.loads(self.rfile.read(length))
             status, body = SERVICE.transcribe(req)
+        except Disabled as e:
+            status, body = 503, {"error": f"disabled: {e}"}
         except (KeyError, ValueError, TypeError) as e:
             status, body = 400, {"error": f"bad request: {e}"}
         except Exception as e:  # noqa: BLE001 - report, keep serving
@@ -189,8 +218,10 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     SERVICE = Service()
     port = int(os.environ.get("PORT", "8000"))
-    if os.environ.get("QWEN_ASR_PRELOAD", "1") not in ("", "0", "false"):
-        SERVICE.load()
+    if SERVICE.disabled_reason:
+        log.warning("disabled: %s", SERVICE.disabled_reason)
+    elif os.environ.get("QWEN_ASR_PRELOAD", "1") not in ("", "0", "false"):
+        threading.Thread(target=SERVICE.preload, daemon=True).start()
     log.info("listening on :%d (device %s)", port, SERVICE.device)
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
 

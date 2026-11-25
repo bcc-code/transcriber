@@ -154,3 +154,35 @@ func spreadWords(text string, start, end float64) []transcriber.Word {
 	}
 	return words
 }
+
+// Status is the service's /healthz answer.
+type Status struct {
+	Enabled        bool   `json:"enabled"`
+	DisabledReason string `json:"disabled_reason"`
+	Model          string `json:"model"`
+}
+
+// Probe asks the service at baseURL whether it can serve the model. It is
+// disabled when it has no Hugging Face token or the model failed to load.
+func Probe(ctx context.Context, client *http.Client, baseURL string) (*Status, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/healthz", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("qwen-asr healthz: status %d", resp.StatusCode)
+	}
+	var st Status
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		return nil, fmt.Errorf("qwen-asr healthz: %w", err)
+	}
+	return &st, nil
+}

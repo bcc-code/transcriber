@@ -194,6 +194,10 @@ With `QWEN_ASR_URL` set, `nordlyd-asr-qwen-0.6b` (alias
 It is served by the `qwen-asr/` service, which runs the model with the
 `qwen-asr` package on the GPU. The model is gated on Hugging Face, so the
 service needs an `HF_TOKEN` from an account that was granted access.
+Without one, or if the model fails to load, the service stays up but reports
+itself disabled on `/healthz`, and the transcriber leaves the model
+unregistered. It checks once at boot (retrying for up to a minute), so restart
+the transcriber after adding the token.
 
 Qwen3-ASR returns text without timestamps. The service splits the audio at
 quiet points into pieces of 20 s or less and returns each piece's text with

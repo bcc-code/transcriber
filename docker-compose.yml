@@ -21,6 +21,11 @@ services:
         # versions; it is built separately by .github/workflows/whisper-base.yml.
         BASE_IMAGE: ${BASE_IMAGE:-ghcr.io/bcc-code/whisper-cuda:v1.8.6-cuda12.6.3}
     restart: unless-stopped
+    # The transcriber asks qwen-asr at boot whether to register its model, so
+    # start it first. Only started, not healthy: it answers before its model loads.
+    depends_on:
+      qwen-asr:
+        condition: service_started
 
     # BIND_ADDR=0.0.0.0 preserves the previous behaviour: the API has no
     # authentication, so anything that can reach this port can read and write
@@ -123,7 +128,8 @@ services:
   # Qwen3-ASR service (qwen-asr/): serves the Nordlyd model
   # (NbAiLab/nordlyd-asr-qwen06B-nov26preview). Same exposure and mount rules
   # as the aligner. The model is gated on Hugging Face: HF_TOKEN must belong to
-  # an account that was granted access, or loading fails.
+  # an account that was granted access. Without it (or if loading fails) the
+  # service stays up but disabled, and the transcriber skips the model.
   qwen-asr:
     image: ${QWEN_ASR_IMAGE:-ghcr.io/bcc-code/transcriber-qwen-asr:latest}
     build:

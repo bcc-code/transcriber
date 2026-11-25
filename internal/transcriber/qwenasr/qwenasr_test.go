@@ -66,3 +66,20 @@ func TestTranscribeError(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestProbe(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"status":"ok","enabled":false,"disabled_reason":"HF_TOKEN not set"}`))
+	}))
+	defer srv.Close()
+	st, err := Probe(context.Background(), nil, srv.URL+"/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Enabled || st.DisabledReason != "HF_TOKEN not set" {
+		t.Errorf("status = %+v", st)
+	}
+}
