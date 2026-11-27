@@ -52,7 +52,25 @@ func BuildCues(t *transcriber.Transcription, opts SubtitleOptions) []Cue {
 		}
 		cues = append(cues, splitSegment(seg, opts)...)
 	}
+	extendCueEnds(cues, cueTailPad)
 	return cues
+}
+
+// cueTailPad is how long a cue may linger after its last word. Forced
+// alignment puts word ends right on the acoustic offset, which reads as the
+// subtitle vanishing too early.
+const cueTailPad = 0.8
+
+// extendCueEnds pushes each cue's end out by up to pad seconds, never past
+// the start of the next cue.
+func extendCueEnds(cues []Cue, pad float64) {
+	for i := range cues {
+		end := cues[i].End + pad
+		if i+1 < len(cues) {
+			end = math.Min(end, cues[i+1].Start)
+		}
+		cues[i].End = math.Max(cues[i].End, end)
+	}
 }
 
 func splitSegment(seg transcriber.Segment, opts SubtitleOptions) []Cue {

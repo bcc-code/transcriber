@@ -37,7 +37,7 @@ func TestBuildCues_LineWrapWithinCue(t *testing.T) {
 
 	cues := BuildCues(tr, SubtitleOptions{})
 	want := []Cue{{
-		Start: 0, End: 5.0,
+		Start: 0, End: 5.0 + cueTailPad,
 		Lines: []string{"This is a test of the", "transcription system."},
 	}}
 	if !reflect.DeepEqual(cues, want) {
@@ -63,7 +63,7 @@ func TestBuildCues_FlushOnMaxLines(t *testing.T) {
 	want := []Cue{
 		{Start: 0, End: 2, Lines: []string{"aaaaaaaa", "bbbbbbbb"}},
 		{Start: 2, End: 4, Lines: []string{"cccccccc", "dddddddd"}},
-		{Start: 4, End: 6, Lines: []string{"eeeeeeee", "ffffffff"}},
+		{Start: 4, End: 6 + cueTailPad, Lines: []string{"eeeeeeee", "ffffffff"}},
 	}
 	if !reflect.DeepEqual(cues, want) {
 		t.Errorf("got %+v, want %+v", cues, want)
@@ -73,11 +73,11 @@ func TestBuildCues_FlushOnMaxLines(t *testing.T) {
 func TestBuildCues_NoWordsFallsBackToSegment(t *testing.T) {
 	tr := &transcriber.Transcription{Segments: []transcriber.Segment{{
 		Start: 1.0, End: 4.5,
-		Text:  "Hello there friend.",
+		Text: "Hello there friend.",
 	}}}
 
 	cues := BuildCues(tr, SubtitleOptions{})
-	want := []Cue{{Start: 1.0, End: 4.5, Lines: []string{"Hello there friend."}}}
+	want := []Cue{{Start: 1.0, End: 4.5 + cueTailPad, Lines: []string{"Hello there friend."}}}
 	if !reflect.DeepEqual(cues, want) {
 		t.Errorf("got %+v, want %+v", cues, want)
 	}
@@ -102,7 +102,7 @@ func TestBuildCues_AvoidsOrphanWithClauseBreak(t *testing.T) {
 	cues := BuildCues(tr, SubtitleOptions{MaxCharsPerLine: 13, MaxLinesPerCue: 2})
 	want := []Cue{
 		{Start: 0, End: 3, Lines: []string{"aaa bbb ccc,"}},
-		{Start: 3, End: 8, Lines: []string{"ddd eee", "fff ggg hhh"}},
+		{Start: 3, End: 8 + cueTailPad, Lines: []string{"ddd eee", "fff ggg hhh"}},
 	}
 	if !reflect.DeepEqual(cues, want) {
 		t.Errorf("got %+v, want %+v", cues, want)
@@ -125,7 +125,7 @@ func TestBuildCues_BalancedTwoLineSplit(t *testing.T) {
 
 	cues := BuildCues(tr, SubtitleOptions{MaxCharsPerLine: 20, MaxLinesPerCue: 2})
 	want := []Cue{{
-		Start: 0, End: 6,
+		Start: 0, End: 6 + cueTailPad,
 		Lines: []string{"Hello world this", "is a farewell."},
 	}}
 	if !reflect.DeepEqual(cues, want) {
@@ -178,10 +178,29 @@ func TestBuildCues_LongWordFitsOnOwnLine(t *testing.T) {
 
 	cues := BuildCues(tr, SubtitleOptions{MaxCharsPerLine: 10, MaxLinesPerCue: 2})
 	want := []Cue{{
-		Start: 0, End: 2.0,
+		Start: 0, End: 2.0 + cueTailPad,
 		Lines: []string{"supercalifragilisticexpialidocious", "ok."},
 	}}
 	if !reflect.DeepEqual(cues, want) {
 		t.Errorf("got %+v, want %+v", cues, want)
+	}
+}
+
+func TestBuildCues_ExtendsEndUntilNextCue(t *testing.T) {
+	tr := &transcriber.Transcription{Segments: []transcriber.Segment{
+		{Start: 0, End: 1.0, Text: "Big gap after."},
+		{Start: 3.0, End: 4.0, Text: "Small gap after."},
+		{Start: 4.3, End: 5.0, Text: "Touching."},
+		{Start: 5.0, End: 6.0, Text: "Last one."},
+	}}
+
+	cues := BuildCues(tr, SubtitleOptions{})
+	got := make([]float64, len(cues))
+	for i, c := range cues {
+		got[i] = c.End
+	}
+	want := []float64{1.8, 4.3, 5.0, 6.8}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ends = %v, want %v", got, want)
 	}
 }
