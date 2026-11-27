@@ -33,6 +33,9 @@ type Job struct {
 	Result   string
 	Results  []string
 	Error    string
+	// NoSpeech marks a completed job whose audio held nothing to transcribe.
+	// The output files are still written, empty.
+	NoSpeech bool
 
 	CreatedAt time.Time
 	StartedAt time.Time

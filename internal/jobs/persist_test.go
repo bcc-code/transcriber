@@ -103,6 +103,7 @@ func TestOpen_RoundTripsJobs(t *testing.T) {
 		j.StartedAt = created.Add(time.Second)
 		j.EndedAt = created.Add(3 * time.Second)
 		j.Duration = 2 * time.Second
+		j.NoSpeech = true
 	})
 	want, _ := s.Get("a")
 	if err := s.Close(); err != nil {
@@ -124,7 +125,8 @@ func TestOpen_RoundTripsJobs(t *testing.T) {
 		got.Progress != want.Progress || got.Result != want.Result ||
 		len(got.Results) != 2 || got.Results[1] != want.Results[1] ||
 		!got.CreatedAt.Equal(want.CreatedAt) || !got.StartedAt.Equal(want.StartedAt) ||
-		!got.EndedAt.Equal(want.EndedAt) || got.Duration != want.Duration {
+		!got.EndedAt.Equal(want.EndedAt) || got.Duration != want.Duration ||
+		got.NoSpeech != want.NoSpeech {
 		t.Fatalf("round trip mismatch:\n got %+v\nwant %+v", got, want)
 	}
 	if _, created := s.CreateOrGet(Job{ID: "b", IdempotencyKey: "key"}); created {

@@ -282,6 +282,7 @@ components:
           model,
           duration,
           priority,
+          no_speech,
         ]
       properties:
         id:
@@ -321,6 +322,13 @@ components:
         error:
           type: string
           description: Present on `FAILED` jobs.
+        no_speech:
+          type: boolean
+          description: |
+            `true` on a `COMPLETED` job whose audio held no speech (silence,
+            music, or only non-speech markers such as `[BLANK_AUDIO]`). The job
+            still completes and its files are still written, but they're empty.
+            Always `false` for jobs that haven't completed.
         timeout_seconds:
           type: integer
           description: The configured timeout for this job (`0` = no timeout).

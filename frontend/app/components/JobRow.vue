@@ -35,6 +35,11 @@ async function onCancel(e: Event) {
             <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 mb-1">
                     <JobStatusBadge :status="job.status" />
+                    <DesignBadge
+                        v-if="job.no_speech"
+                        variant="warning"
+                        label="no speech"
+                    />
                     <span class="text-caption-1 text-text-hint font-mono">{{
                         job.id.slice(0, 8)
                     }}</span>

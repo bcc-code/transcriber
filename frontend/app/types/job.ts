@@ -21,6 +21,8 @@ export interface TranscribeJob {
   duration: string;
   priority: number;
   error?: string;
+  /** True on a COMPLETED job whose audio held no speech; its files are empty. */
+  no_speech?: boolean;
 }
 
 export interface TranscribeInput {

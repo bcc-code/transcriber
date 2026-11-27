@@ -19,7 +19,7 @@ func (q *Queries) DeleteJob(ctx context.Context, id string) error {
 }
 
 const listJobs = `-- name: ListJobs :many
-SELECT id, path, language, format, output_path, priority, callback, model, prompt, subtitle_max_chars, subtitle_max_lines, timeout_ns, idempotency_key, status, progress, result, results, error, created_at, started_at, ended_at, duration_ns FROM jobs ORDER BY created_at
+SELECT id, path, language, format, output_path, priority, callback, model, prompt, subtitle_max_chars, subtitle_max_lines, timeout_ns, idempotency_key, status, progress, result, results, error, created_at, started_at, ended_at, duration_ns, no_speech FROM jobs ORDER BY created_at
 `
 
 func (q *Queries) ListJobs(ctx context.Context) ([]Job, error) {
@@ -54,6 +54,7 @@ func (q *Queries) ListJobs(ctx context.Context) ([]Job, error) {
 			&i.StartedAt,
 			&i.EndedAt,
 			&i.DurationNs,
+			&i.NoSpeech,
 		); err != nil {
 			return nil, err
 		}
@@ -72,12 +73,12 @@ const upsertJob = `-- name: UpsertJob :exec
 INSERT INTO jobs (
     id, path, language, format, output_path, priority, callback, model, prompt,
     subtitle_max_chars, subtitle_max_lines, timeout_ns, idempotency_key,
-    status, progress, result, results, error,
+    status, progress, result, results, error, no_speech,
     created_at, started_at, ended_at, duration_ns
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, ?,
     ?, ?, ?, ?,
-    ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?, ?,
     ?, ?, ?, ?
 )
 ON CONFLICT (id) DO UPDATE SET
@@ -98,6 +99,7 @@ ON CONFLICT (id) DO UPDATE SET
     result             = excluded.result,
     results            = excluded.results,
     error              = excluded.error,
+    no_speech          = excluded.no_speech,
     created_at         = excluded.created_at,
     started_at         = excluded.started_at,
     ended_at           = excluded.ended_at,
@@ -123,6 +125,7 @@ type UpsertJobParams struct {
 	Result           string
 	Results          string
 	Error            string
+	NoSpeech         int64
 	CreatedAt        int64
 	StartedAt        int64
 	EndedAt          int64
@@ -149,6 +152,7 @@ func (q *Queries) UpsertJob(ctx context.Context, arg UpsertJobParams) error {
 		arg.Result,
 		arg.Results,
 		arg.Error,
+		arg.NoSpeech,
 		arg.CreatedAt,
 		arg.StartedAt,
 		arg.EndedAt,

@@ -361,6 +361,7 @@ func toParams(j Job) (jobsdb.UpsertJobParams, error) {
 		Result:           j.Result,
 		Results:          string(results),
 		Error:            j.Error,
+		NoSpeech:         boolToInt(j.NoSpeech),
 		CreatedAt:        toMillis(j.CreatedAt),
 		StartedAt:        toMillis(j.StartedAt),
 		EndedAt:          toMillis(j.EndedAt),
@@ -394,6 +395,7 @@ func fromRow(r jobsdb.Job) (Job, error) {
 		Result:         r.Result,
 		Results:        results,
 		Error:          r.Error,
+		NoSpeech:       r.NoSpeech != 0,
 		CreatedAt:      fromMillis(r.CreatedAt),
 		StartedAt:      fromMillis(r.StartedAt),
 		EndedAt:        fromMillis(r.EndedAt),
@@ -414,4 +416,11 @@ func fromMillis(ms int64) time.Time {
 		return time.Time{}
 	}
 	return time.UnixMilli(ms)
+}
+
+func boolToInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }

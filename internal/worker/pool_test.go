@@ -112,6 +112,9 @@ func TestPool_IntermediatesStayOutOfOutputPath(t *testing.T) {
 	if final.Status != jobs.StatusCompleted {
 		t.Fatalf("status = %q (%s), want COMPLETED", final.Status, final.Error)
 	}
+	if final.NoSpeech {
+		t.Error("NoSpeech set on a job with speech")
+	}
 
 	// output_path holds deliverables and nothing else.
 	entries, err := os.ReadDir(outPath)
@@ -234,5 +237,66 @@ func TestPool_ShutdownLeavesJobForRecovery(t *testing.T) {
 	got, _ := store.Get(job.ID)
 	if got.Status != jobs.StatusRunning || !got.EndedAt.IsZero() {
 		t.Fatalf("after shutdown: status=%q ended=%v, want RUNNING and not ended", got.Status, got.EndedAt)
+	}
+}
+
+// silentAdapter returns what whisper.cpp gives for silence: a lone marker.
+type silentAdapter struct{}
+
+func (silentAdapter) ID() string   { return "silent" }
+func (silentAdapter) Name() string { return "Silent" }
+
+func (silentAdapter) Transcribe(context.Context, transcriber.Request, transcriber.ProgressFunc) (*transcriber.Result, error) {
+	return &transcriber.Result{
+		Transcription: &transcriber.Transcription{
+			Language: "en",
+			Text:     "[BLANK_AUDIO]",
+			Segments: []transcriber.Segment{{Start: 0, End: 30, Text: "[BLANK_AUDIO]"}},
+		},
+	}, nil
+}
+
+func TestPool_FlagsNoSpeech(t *testing.T) {
+	tmp := t.TempDir()
+	outPath := filepath.Join(tmp, "out")
+
+	store := jobs.NewStore(0)
+	queue := jobs.NewQueue()
+	t.Cleanup(queue.Close)
+	registry := transcriber.NewRegistry("silent")
+	registry.Register(silentAdapter{})
+	pool := New(1, store, queue, registry, nil, func(j jobs.Job) any { return j },
+		Config{ScratchRoot: filepath.Join(tmp, "scratch")})
+	pool.Start(t.Context())
+
+	now := time.Now()
+	job := jobs.Job{
+		ID:         "silent",
+		Path:       filepath.Join(tmp, "input.wav"),
+		OutputPath: outPath,
+		Format:     "json,srt",
+		Status:     jobs.StatusPending,
+		CreatedAt:  now,
+	}
+	store.Create(job)
+	queue.Push(job.ID, 1, now)
+
+	var final jobs.Job
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if j, ok := store.Get(job.ID); ok && isTerminal(j.Status) {
+			final = j
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if final.Status != jobs.StatusCompleted {
+		t.Fatalf("status = %q (%s), want COMPLETED", final.Status, final.Error)
+	}
+	if !final.NoSpeech {
+		t.Error("NoSpeech not set for a silent file")
+	}
+	if len(final.Results) != 2 {
+		t.Errorf("results = %v, want json and srt still written", final.Results)
 	}
 }

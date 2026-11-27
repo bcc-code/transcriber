@@ -100,6 +100,15 @@ async function onCancel() {
             </div>
 
             <DesignBanner
+                v-if="job.no_speech"
+                variant="warning"
+                icon="tabler:volume-off"
+            >
+                No speech was found in this file. The transcript files were
+                written but are empty.
+            </DesignBanner>
+
+            <DesignBanner
                 v-if="job.error"
                 variant="error"
                 icon="tabler:alert-circle"

@@ -37,6 +37,7 @@ type TranscribeJob struct {
 	Duration        string                   `json:"duration"`
 	Priority        int                      `json:"priority"`
 	Error           string                   `json:"error,omitempty"`
+	NoSpeech        bool                     `json:"no_speech"`
 	TimeoutSeconds  int                      `json:"timeout_seconds,omitempty"`
 }
 
@@ -63,6 +64,7 @@ func ToDTO(j jobs.Job) TranscribeJob {
 		Duration:        formatDuration(j.Duration),
 		Priority:        j.Priority,
 		Error:           j.Error,
+		NoSpeech:        j.NoSpeech,
 		TimeoutSeconds:  int(j.Timeout / time.Second),
 	}
 }

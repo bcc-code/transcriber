@@ -2,12 +2,12 @@
 INSERT INTO jobs (
     id, path, language, format, output_path, priority, callback, model, prompt,
     subtitle_max_chars, subtitle_max_lines, timeout_ns, idempotency_key,
-    status, progress, result, results, error,
+    status, progress, result, results, error, no_speech,
     created_at, started_at, ended_at, duration_ns
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, ?,
     ?, ?, ?, ?,
-    ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?, ?,
     ?, ?, ?, ?
 )
 ON CONFLICT (id) DO UPDATE SET
@@ -28,6 +28,7 @@ ON CONFLICT (id) DO UPDATE SET
     result             = excluded.result,
     results            = excluded.results,
     error              = excluded.error,
+    no_speech          = excluded.no_speech,
     created_at         = excluded.created_at,
     started_at         = excluded.started_at,
     ended_at           = excluded.ended_at,

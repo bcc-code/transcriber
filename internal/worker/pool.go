@@ -183,6 +183,8 @@ func (p *Pool) runJob(parent context.Context, id string, log *slog.Logger) {
 		return
 	}
 
+	noSpeech := !res.Transcription.HasSpeech()
+
 	wantFormats := formats.Parse(job.Format)
 	basename := filepath.Base(job.Path)
 	primary := ""
@@ -208,8 +210,9 @@ func (p *Pool) runJob(parent context.Context, id string, log *slog.Logger) {
 		j.Duration = endedAt.Sub(startedAt)
 		j.Result = primary
 		j.Results = written
+		j.NoSpeech = noSpeech
 	})
-	log.Info("job completed", "id", id, "duration", endedAt.Sub(startedAt))
+	log.Info("job completed", "id", id, "duration", endedAt.Sub(startedAt), "no_speech", noSpeech)
 	p.fireCallback(id)
 }
 

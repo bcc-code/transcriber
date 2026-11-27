@@ -15,6 +15,7 @@ real failure. They're documented for context if a future caller appears.
 - **`output_path` is required.** Old accepted empty; new returns `400`. The caller always sets it.
 - **`format` field honoring.** Old python ignored `format` entirely and always wrote all five files. New honors `format` strictly. The caller always sends `format: "all"`, which writes all five (now including `words.srt`).
 - **`list` contents.** Old kept only the last 10 processed jobs in memory. New persists jobs in SQLite and keeps terminal ones (completed/failed/canceled) for `-retention` (default 7 days) after they end; active jobs are never pruned. The list is larger, and survives restarts.
+- **`no_speech` field added.** `true` on a `COMPLETED` job whose audio held no speech; its output files are written but empty. Old had no such signal. The status stays `COMPLETED` rather than getting a new value, because the caller polls forever on unknown statuses.
 - **Status set additive.** New emits `CANCELED` (in addition to the old `QUEUED|RUNNING|COMPLETED|FAILED`); the caller's status switch falls through unknowns and keeps polling.
 
 ## Missing endpoints

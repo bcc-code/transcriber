@@ -27,4 +27,5 @@ type Job struct {
 	StartedAt        int64
 	EndedAt          int64
 	DurationNs       int64
+	NoSpeech         int64
 }

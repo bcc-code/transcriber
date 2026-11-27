@@ -3,6 +3,7 @@ package transcriber
 import (
 	"context"
 	"time"
+	"unicode"
 )
 
 // Transcription mirrors the OpenAI Whisper JSON layout.
@@ -10,6 +11,41 @@ type Transcription struct {
 	Text     string    `json:"text"`
 	Segments []Segment `json:"segments"`
 	Language string    `json:"language"`
+}
+
+// HasSpeech reports whether any segment carries spoken text. Segments that
+// are empty or only a non-speech marker ("[BLANK_AUDIO]", "(music)", "♪")
+// don't count: models emit those for silence and music.
+func (t *Transcription) HasSpeech() bool {
+	if t == nil {
+		return false
+	}
+	for _, s := range t.Segments {
+		if !isNonSpeech(s.Text) {
+			return true
+		}
+	}
+	// Some backends return text without segments.
+	return len(t.Segments) == 0 && !isNonSpeech(t.Text)
+}
+
+// isNonSpeech is true for text with no letters or digits once bracketed and
+// parenthesized markers are removed.
+func isNonSpeech(text string) bool {
+	depth := 0
+	for _, r := range text {
+		switch r {
+		case '[', '(':
+			depth++
+		case ']', ')':
+			depth = max(0, depth-1)
+		default:
+			if depth == 0 && (unicode.IsLetter(r) || unicode.IsDigit(r)) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 type Segment struct {
